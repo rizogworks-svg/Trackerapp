@@ -1,0 +1,8 @@
+{
+  "name": "trackers-workspace",
+  "version": "6.0.0",
+  "private": true,
+  "description": "Trackers Workspace: functional repair and reference UI",
+  "scripts": {"start": "node server.cjs", "test": "node --test tests/regression.test.cjs"},
+  "engines": {"node": ">=24"}
+}
