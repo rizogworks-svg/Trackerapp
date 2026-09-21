@@ -35,3 +35,12 @@ input,select,textarea{width:100%;min-width:0;border:1px solid var(--line);backgr
 [data-theme=dark] .global-search-bar input::placeholder{color:#172518}[data-theme=dark] .global-search-icon{filter:none}
 .pkbon-site-row{display:flex;justify-content:space-between;gap:14px;background:var(--card);border:1px solid var(--line);padding:14px;border-radius:10px;margin-bottom:10px}.pkbon-site-row h4{margin:0 0 4px}.pkbon-site-row p{font-size:11px;color:var(--muted);margin:0}.pkbon-site-row-right{display:grid;justify-items:end;gap:8px}.pkbon-site-amount{font-weight:850}.money{text-align:right}.admin-user-main{min-width:0;flex:1}.admin-user-main strong,.admin-user-main small{display:block;overflow-wrap:anywhere}.admin-role-select{width:155px}.settings-info{font-size:11px;color:var(--muted);padding:12px 0}
 @media(max-width:600px){.sync-indicator{max-width:60px;white-space:normal;padding:5px;font-size:8px}.pkbon-site-row,.admin-user-row{flex-wrap:wrap}.admin-role-select{width:140px}}
+
+/* Task dates: labels and optional calendar input for new and existing work. */
+#tasksModal .task-edit-row{grid-template-columns:minmax(0,1fr) 175px 135px 36px;align-items:end}
+.task-add-row{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:8px;align-items:end;margin:18px 0}
+#tasksModal input[type=date]{min-height:43px;color-scheme:light}
+:root[data-theme=dark] #tasksModal input[type=date]{color-scheme:dark}
+#tasksModal .task-edit-row>.remove{height:43px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--text)}
+.task-preview-copy{min-width:0;overflow-wrap:anywhere}.task-preview-copy small{display:block;margin-top:4px;font-size:11px}.task-preview>div>span{flex-shrink:0}
+@media(max-width:700px){#tasksModal .task-edit-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 36px}#tasksModal .task-title-field{grid-column:1/-1}.task-add-row{grid-template-columns:minmax(0,1fr) auto}.task-add-row .task-date-field{grid-column:1}.task-add-row>.btn{grid-column:2}.task-add-row input{width:100%}}

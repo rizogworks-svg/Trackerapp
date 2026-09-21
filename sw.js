@@ -1,6 +1,6 @@
 /* Scope-local caches; never cache account/API responses. */
 const CACHE_PREFIX='trackers:'+new URL(self.registration.scope).pathname+':';
-const CACHE_NAME=CACHE_PREFIX+'v6.1';
+const CACHE_NAME=CACHE_PREFIX+'v6.2';
 const APP_SHELL=['./','./index.html','./manifest.webmanifest','./assets/css/workspace.css',
  './assets/js/storage-guard.js','./assets/js/core.js','./assets/js/sheets.js','./assets/js/config.js','./assets/js/cloud.js','./assets/js/pkbon.js','./assets/js/app.js','./assets/js/workspace.js','./assets/js/boot.js',
  ...['trackers-logo','trackers-logo-dark','dashboard','project','documentation','accounting','notes','report','settings','account','magnifying-glass','icon-192','icon-512','icon-maskable-512'].map(n=>'./assets/img/'+n+'.png')];

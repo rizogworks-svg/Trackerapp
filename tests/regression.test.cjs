@@ -75,3 +75,17 @@ test('PKBON price keeps the caret next to the edited digit when regrouping',asyn
  price.selectionStart=2;input(price,'12.45.678');
  assert.equal(price.value,'1.245.678');assert.equal(price.selectionStart,3);
 });
+
+test('task date supports add, edit, cancel, reload and clearing without changing progress',async()=>{
+ const h=await load();h.run("openDetail('s1')");h.fire('manageTasks');input(h.el('newTaskTitle'),'Survey');input(h.el('newTaskDate'),'2026-09-21');h.fire('addTask');h.fire('saveTasks');
+ assert.equal(state(h).sites[0].tasks[0].date,'2026-09-21');assert.match(h.el('dTaskPreview').textContent,/21/);assert.equal(h.el('dProgressPct').textContent,'0%');
+ const restored=await load({[KEY]:h.context.localStorage.getItem(KEY)});assert.equal(state(restored).sites[0].tasks[0].date,'2026-09-21');
+ h.fire('manageTasks');input(h.el('taskEditor').querySelector('[data-task-date]'),'2026-10-01');h.run("closeModal('tasksModal')");h.fire('manageTasks');assert.equal(h.el('taskEditor').querySelector('[data-task-date]').value,'2026-09-21');
+ input(h.el('taskEditor').querySelector('[data-task-date]'),'2026-10-01');h.fire('saveTasks');assert.equal(state(h).sites[0].tasks[0].date,'2026-10-01');
+ h.fire('manageTasks');input(h.el('taskEditor').querySelector('[data-task-date]'),'');h.fire('saveTasks');assert.equal(state(h).sites[0].tasks[0].date,'');
+});
+test('legacy tasks without dates remain editable and invalid dates cannot replace saved work',async()=>{
+ const h=await load();state(h).sites[0].tasks=[{id:'old',title:'Lama',status:'Completed'}];h.run("openDetail('s1')");h.fire('manageTasks');assert.equal(h.el('taskEditor').querySelector('[data-task-date]').value,'');
+ input(h.el('taskEditor').querySelector('[data-task-date]'),'2026-02-31');h.fire('saveTasks');assert.equal(state(h).sites[0].tasks[0].date,undefined);assert.match(h.el('toast').textContent,/Tanggal pekerjaan tidak valid/);
+ input(h.el('taskEditor').querySelector('[data-task-date]'),'2026-09-21');h.fire('saveTasks');assert.equal(h.el('dProgressPct').textContent,'100%');
+});

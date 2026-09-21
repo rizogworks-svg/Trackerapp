@@ -14,22 +14,35 @@ function renderDetailExtras(s){
   $('dProgressPct').textContent=pct+'%';$('dProgressFill').style.width=pct+'%';$('dProgressBar').setAttribute('aria-valuenow',pct);
   $('dWorkDone').textContent=done;$('dWorkActive').textContent=active;$('dWorkPending').textContent=tasks.length-done-active;
   $('dProgressNote').textContent=tasks.length?`${done} dari ${tasks.length} pekerjaan selesai.`:s.status==='Completed'?'Project ditandai Completed. Belum ada rincian pekerjaan.':'Tambahkan pekerjaan untuk menghitung progres.';
-  $('dTaskPreview').innerHTML=tasks.slice(0,6).map(t=>`<div><strong>${esc(t.title)}</strong><span>${t.status==='Completed'?'✓ Selesai':t.status==='In Progress'?'Proses':'Pending'}</span></div>`).join('');
+  $('dTaskPreview').innerHTML=tasks.slice(0,6).map(t=>`<div><div class="task-preview-copy"><strong>${esc(t.title)}</strong>${t.date?`<small>Tanggal: ${esc(fmt(t.date))}</small>`:''}</div><span>${t.status==='Completed'?'✓ Selesai':t.status==='In Progress'?'Proses':'Pending'}</span></div>`).join('');
   const progress=bp?bastProcessProgress(bp):null;
   $('dBastStages').innerHTML=s.bast.map(b=>{const stage=progress?.stages.find(x=>x.name===b.label);return `<div class="bast-stage-row"><span class="bast-stage-name">${esc(b.label)}</span><span class="bast-stage-state">${esc(stage?.state||(b.done?'Done':'Belum'))}</span><span>${b.done?'✓':'—'}</span></div>`;}).join('');
   const recent=state.activities.filter(a=>a.siteId===s.id).slice(0,6);
   $('dActivities').innerHTML=recent.length?recent.map(a=>`<div><strong>${esc(a.text)}</strong><small>${esc(new Date(a.time).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'}))}</small></div>`).join(''):'<p class="muted">Belum ada aktivitas untuk site ini.</p>';
 }
 function renderTasks(){
-  $('taskEditor').innerHTML=taskDraft.map((t,i)=>`<div class="task-edit-row"><input aria-label="Nama pekerjaan ${i+1}" data-task-title="${i}" value="${esc(t.title)}"/><select aria-label="Status pekerjaan ${i+1}" data-task-status="${i}">${['Pending','In Progress','Completed'].map(st=>`<option ${st===t.status?'selected':''}>${st}</option>`).join('')}</select><button class="remove" aria-label="Hapus pekerjaan ${i+1}" data-task-remove="${i}" type="button">×</button></div>`).join('')||'<p class="muted">Tambahkan pekerjaan pertama di bawah.</p>';
+  $('taskEditor').innerHTML=taskDraft.map((t,i)=>`<div class="task-edit-row"><label class="field task-title-field"><span>Pekerjaan</span><input aria-label="Nama pekerjaan ${i+1}" data-task-title="${i}" value="${esc(t.title)}"/></label><label class="field task-date-field"><span>Tanggal pekerjaan</span><input type="date" aria-label="Tanggal pekerjaan ${i+1}" data-task-date="${i}" value="${esc(t.date||'')}"/></label><label class="field task-status-field"><span>Status</span><select aria-label="Status pekerjaan ${i+1}" data-task-status="${i}">${['Pending','In Progress','Completed'].map(st=>`<option ${st===t.status?'selected':''}>${st}</option>`).join('')}</select></label><button class="remove" aria-label="Hapus pekerjaan ${i+1}" data-task-remove="${i}" type="button">×</button></div>`).join('')||'<p class="muted">Tambahkan pekerjaan pertama di bawah.</p>';
   $('taskEditor').querySelectorAll('[data-task-title]').forEach(e=>e.oninput=()=>taskDraft[+e.dataset.taskTitle].title=e.value);
+  $('taskEditor').querySelectorAll('[data-task-date]').forEach(e=>{e.oninput=e.onchange=()=>taskDraft[+e.dataset.taskDate].date=e.value;});
   $('taskEditor').querySelectorAll('[data-task-status]').forEach(e=>e.onchange=()=>taskDraft[+e.dataset.taskStatus].status=e.value);
   $('taskEditor').querySelectorAll('[data-task-remove]').forEach(e=>e.onclick=()=>{taskDraft.splice(+e.dataset.taskRemove,1);renderTasks();});
 }
-$('manageTasks').onclick=()=>{taskDraft=JSON.parse(JSON.stringify(site(currentSite)?.tasks||[]));$('newTaskTitle').value='';renderTasks();openModal('tasksModal');};
-$('addTask').onclick=()=>{const title=$('newTaskTitle').value.trim();if(!title)return toast('Isi nama pekerjaan.');taskDraft.push({id:uid('task'),title,status:'Pending'});$('newTaskTitle').value='';renderTasks();$('newTaskTitle').focus();};
-$('newTaskTitle').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('addTask').click();}};
-$('saveTasks').onclick=()=>{const s=site(currentSite);if(!s)return;if(taskDraft.some(x=>!x.title.trim()))return toast('Nama pekerjaan tidak boleh kosong.');s.tasks=taskDraft.map(x=>({...x,title:x.title.trim()}));activity('Progres pekerjaan '+s.siteName+' diperbarui',s.id);save();closeModal('tasksModal');renderDetail();renderDashboard();toast('Pekerjaan disimpan');};
+$('manageTasks').onclick=()=>{taskDraft=JSON.parse(JSON.stringify(site(currentSite)?.tasks||[]));$('newTaskTitle').value='';$('newTaskDate').value='';renderTasks();openModal('tasksModal');};
+$('addTask').onclick=()=>{
+  const title=$('newTaskTitle').value.trim(),date=$('newTaskDate').value;
+  if(!title)return toast('Isi nama pekerjaan.');
+  if($('newTaskDate').validity?.badInput||(date&&!TrackersCore.date(date)))return toast('Tanggal pekerjaan tidak valid.');
+  taskDraft.push({id:uid('task'),title,date:date?TrackersCore.date(date):'',status:'Pending'});
+  $('newTaskTitle').value='';$('newTaskDate').value='';renderTasks();$('newTaskTitle').focus();
+};
+for(const id of ['newTaskTitle','newTaskDate'])$(id).onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();$('addTask').click();}};
+$('saveTasks').onclick=()=>{
+  const s=site(currentSite);if(!s)return;
+  if(taskDraft.some(x=>!x.title.trim()))return toast('Nama pekerjaan tidak boleh kosong.');
+  if(taskDraft.some(x=>x.date&&!TrackersCore.date(x.date))||[...$('taskEditor').querySelectorAll('[data-task-date]')].some(e=>e.validity?.badInput))return toast('Tanggal pekerjaan tidak valid.');
+  s.tasks=taskDraft.map(x=>({...x,title:x.title.trim(),date:x.date?TrackersCore.date(x.date):''}));
+  activity('Progres pekerjaan '+s.siteName+' diperbarui',s.id);save();closeModal('tasksModal');renderDetail();renderDashboard();toast('Pekerjaan disimpan');
+};
 $('archiveSite').onclick=()=>{const s=site(currentSite);if(!s)return;s.archived=!s.archived;activity(s.siteName+(s.archived?' diarsipkan':' dipulihkan'),s.id);save();renderAll();renderDetail();toast(s.archived?'Site masuk arsip. Pulihkan kapan saja.':'Site dipulihkan.');};
 $('editBastFromDetail').onclick=()=>{const bp=latestBastProcessForSite(currentSite);if(bp)openBastProcessModal(bp.id);else openBast();};
 $('projectArchiveFilter').onchange=renderSites;
