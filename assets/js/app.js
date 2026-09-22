@@ -200,7 +200,7 @@ function applyTheme(){
 function renderThemeChoices(){
   const box=$("themeChoices");if(!box)return;
   box.innerHTML=Object.entries(THEMES).map(([k,t])=>`<button class="theme-choice ${state.theme===k?"active":""}" type="button" data-theme="${k}"><span class="theme-swatch"><i style="background:${t.tone1}"></i><i style="background:${t.tone2}"></i></span><span><strong>${t.name}</strong><br><small>Dua warna utama</small></span></button>`).join("");
-  box.querySelectorAll("[data-theme]").forEach(b=>b.onclick=()=>{state.theme=b.dataset.theme;save();applyTheme();renderSettings();toast("Tema diubah")})
+  box.querySelectorAll("[data-theme]").forEach(b=>b.onclick=()=>{state.theme=b.dataset.theme;if(typeof opsCanEdit!=="function"||opsCanEdit())save();applyTheme();renderSettings();toast("Tema diubah")})
 }
 function renderClientSettingsList(){
   const box=$("clientSettingsList");if(!box)return;
@@ -234,6 +234,7 @@ function load(){
       sites:Array.isArray(r.sites)?r.sites:[],
       clients:Array.isArray(r.clients)?r.clients:[],
       rules:Array.isArray(r.rules)?r.rules:[],
+      auditTrail:Array.isArray(r.auditTrail)?r.auditTrail:[],
       activities:Array.isArray(r.activities)?r.activities:[],
       theme:(r.theme==="midnight"?"midnight":"light"),
       pinned:Array.isArray(r.pinned)?r.pinned:[],
@@ -260,7 +261,7 @@ const uid=p=>p+"_"+Date.now()+"_"+Math.random().toString(16).slice(2);
 function toast(t){$("toast").textContent=t;$("toast").classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>$("toast").classList.remove("show"),1800)}
 function activity(t,siteRef=null){
   const s=siteRef?site(siteRef):null;
-  state.activities.unshift({id:uid("a"),text:t,time:new Date().toISOString(),siteId:s?.id||"",siteName:s?.siteName||""});
+  state.activities.unshift({actor:cloudSession?.user?.email||"Lokal",id:uid("a"),text:t,time:new Date().toISOString(),siteId:s?.id||"",siteName:s?.siteName||""});
   state.activities=state.activities.slice(0,100)
 }
 function openModal(id){$(id).classList.add("open");document.body.style.overflow="hidden"}
@@ -1278,8 +1279,9 @@ function renderFinance(){
   updateFinanceTotals()
 }
 function openFinance(){
-  if($("financeBuild"))$("financeBuild").textContent="Input nominal v6.4 • sampai miliaran dan triliunan";
+  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.0 • sampai miliaran dan triliunan";
   const s=normalizeSiteModules(site(currentSite));if(!s)return;
+  $("financeDueDate").value=s.finance.dueDate||"";
   prepareFinanceDraft(s);
   renderFinance();
   openModal("financeModal")
@@ -1564,7 +1566,9 @@ $("saveFinance").onclick=()=>{
     )
   });
 
+  if($("financeDueDate").validity?.badInput||($("financeDueDate").value&&!TrackersCore.date($("financeDueDate").value)))return toast("Tanggal jatuh tempo tidak valid.");
   s.finance={
+    ...s.finance,dueDate:$("financeDueDate").value,
     rows:cleaned.map(r=>({
       id:r.id,
       section:r.section,
@@ -1716,7 +1720,7 @@ async function resetAllWorkspaceData(){
     ].forEach(k=>localStorage.removeItem(k));
     if(typeof CLOUD_LOCAL_UPDATED_KEY!=="undefined")localStorage.setItem(CLOUD_LOCAL_UPDATED_KEY,now);
     if(typeof cloudSession!=="undefined"&&cloudSession?.user&&typeof CLOUD_SYNCED_USER_KEY!=="undefined"){
-      localStorage.setItem(CLOUD_SYNCED_USER_KEY,cloudSession.user.id)
+      localStorage.setItem(CLOUD_SYNCED_USER_KEY,cloudIdentity())
     }
     closeModal('resetAllDataModal');
     location.reload();
@@ -1791,7 +1795,7 @@ $("notesArchiveMode").onclick=()=>{noteViewMode="archive";renderNotes()};
 document.querySelectorAll("[data-note-color]").forEach(b=>b.onclick=()=>selectNoteColor(b.dataset.noteColor));
 
 if($("notificationBtn"))$("notificationBtn").onclick=()=>{
-  state.lastNotificationSeen=new Date().toISOString();save();refreshNotificationState();renderNotifications();openModal("notificationModal")
+  state.lastNotificationSeen=new Date().toISOString();if(typeof opsCanEdit!=="function"||opsCanEdit())save();refreshNotificationState();renderNotifications();openModal("notificationModal")
 };
 $("notificationDateFilter").onchange=renderNotifications;
 $("clearNotificationDate").onclick=()=>{$("notificationDateFilter").value="";renderNotifications()};

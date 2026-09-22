@@ -3,7 +3,7 @@ const C=require('../assets/js/core.js'),X=require('../assets/js/sheets.js');
 const {makeHarness,Storage}=require('./dom-harness.cjs');
 const KEY='tracklyMidnightCleanV2',OWNER='tracklyCloudSyncedUser',BASE='trackersCloudBaseAtV2',DIRTY='trackersCloudDirtyV2';
 const seed=()=>({sites:[{id:'s1',siteName:'SITE DEMO',siteId:'SITE-001',projectId:'P-001',clientSiteId:'C-001',client:'Client Uji',tenant:'Tenant Uji',region:'Jawa Tengah',workType:'COLLOCATION',status:'In Progress',spmkDate:'2026-09-01',towerHeight:42,pln:{},oneflux:[],bast:[],finance:{rows:[]}},{id:'s2',siteName:'SITE DEMO',siteId:'SITE-002',projectId:'P-002',client:'Client Uji',tenant:'Tenant Uji',region:'Jawa Timur',workType:'CME',status:'Completed',spmkDate:'2026-09-10',pln:{},oneflux:[],bast:[],finance:{rows:[]}}],clients:[{id:'c1',name:'Client Uji'}],tenants:['Tenant Uji'],rules:[],pinned:[],activities:[],notes:[],bastProcesses:[],theme:'light'});
-const load=async(extra={},opts={})=>{const h=makeHarness({[KEY]:JSON.stringify(seed()),...extra},opts);await h.flush();return h;};
+const load=async(extra={},opts={})=>{const h=makeHarness({[KEY]:JSON.stringify(seed()),...extra},opts);await h.flush();if(!opts.session){h.run("currentAccessProfile={role:'owner',access_enabled:true};trackersUpdateRoleUI()");}return h;};
 const state=h=>h.run('state');
 const submit=(h,id)=>h.el(id).onsubmit({currentTarget:h.el(id),preventDefault(){}});
 const input=(e,value)=>{e.value=value;e.dispatchEvent({type:'input'});};
@@ -50,7 +50,7 @@ test('corrupt saved data starts safely and cannot overwrite local or cloud recor
 test('legacy PKBON association survives editing the site name',async()=>{const h=await load({pkbon_history:JSON.stringify([{id:'legacy',pkbonNo:'1',site:'SITE DEMO',projectId:'P-001',status:'Terbayar',items:[],total:2500}])});h.run("openSiteModal('s1')");h.el('siteForm').siteName.value='NAMA BARU';submit(h,'siteForm');await h.flush();assert.equal(JSON.parse(h.context.localStorage.getItem('pkbon_history'))[0].workspaceSiteId,'s1');assert.equal(h.run("pkbonSiteStats(site('s1')).paid"),2500);});
 test('legacy PKBON avoids double counting for identical project/name with different SOW',()=>{const a={id:'a',projectId:'P',siteName:'SITE',workType:'CME'},b={...a,id:'b',workType:'SITAC'};assert.equal(C.belongs({projectId:'P',site:'SITE'},a,[a,b]),false);assert.equal(C.belongs({workspaceSiteId:'a'},a,[a,b]),true);});
 test('quick PKBON status change cannot approve an incomplete draft',async()=>{const h=await load({pkbon_history:JSON.stringify([{id:'draft',pkbonNo:'1',site:'SITE DEMO',projectId:'P-001',status:'Draft',items:[],total:0}])});const select=h.el('historyList').querySelector('[data-history-status]');select.value='Terbayar';select.dispatchEvent({type:'change'});assert.equal(JSON.parse(h.context.localStorage.getItem('pkbon_history'))[0].status,'Draft');assert.match(h.alerts.at(-1),/lengkapi/);});
-test('edits made while an upload is in flight remain pending for the next upload',async()=>{const h=await load({}, {session:{user:{id:'u1'}}});let finish;h.client.rpc=()=>new Promise(resolve=>{finish=resolve});h.run('cloudLocalTouch()');const request=h.run('cloudPush()');h.run('state.notes.push({id:"during",title:"During upload"});save()');finish({data:{ok:true,updated_at:'new-base'}});assert.equal(await request,true);assert.equal(h.context.localStorage.getItem(DIRTY),'1');assert.equal(JSON.parse(h.context.localStorage.getItem(KEY)).notes[0].title,'During upload');});
+test('edits made while an upload is in flight remain pending for the next upload',async()=>{const h=await load({}, {session:{user:{id:'u1'}}});let finish;h.client.rpc=()=>new Promise(resolve=>{finish=resolve});h.run('cloudLocalTouch()');const request=h.run('cloudPush()');await h.flush();assert.equal(typeof finish,'function');h.run('state.notes.push({id:"during",title:"During upload"});save()');finish({data:{ok:true,updated_at:'new-base'}});assert.equal(await request,true);assert.equal(h.context.localStorage.getItem(DIRTY),'1');assert.equal(JSON.parse(h.context.localStorage.getItem(KEY)).notes[0].title,'During upload');});
 test('compressed XLSX from openpyxl handles blank columns, text IDs and 1904 dates',async()=>{const h=await load(),buf=fs.readFileSync(path.join(__dirname,'fixtures/site-import-1904.xlsx'));h.context.xlsxBytes=buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.byteLength);const rows=await h.run('TrackersSheets.readXlsx(xlsxBytes)');assert.equal(rows[0]['SITE NAME'],'SITE & UJI');assert.equal(rows[0]['PROJECT ID'],'0012');h.context.rows=rows;h.run('importSiteRows(rows)');assert.equal(state(h).sites.find(s=>s.siteId==='S-001').spmkDate,'2026-09-20');});
 test('generated XLSX round trips and rejects damaged content',async()=>{const h=await load();const bytes=X.workbook([['NAME','VALUE'],['=1+1',123]]);h.context.xlsxBytes=bytes.buffer;const rows=await h.run('TrackersSheets.readXlsx(xlsxBytes)');assert.equal(rows[0].NAME,'=1+1');assert.equal(rows[0].VALUE,123);const corrupted=bytes.slice(),at=Buffer.from(corrupted).indexOf(Buffer.from('=1+1'));corrupted[at]=65;await assert.rejects(X.unzip(corrupted.buffer),/checksum/);});
 
@@ -116,7 +116,7 @@ test('PERKUATAN screenshot case types 3333333333 and retains billions after save
  const h=await load();state(h).sites[0].workType='PERKUATAN';h.run("openDetail('s1');openFinance()");
  const field=h.el('financeSections').querySelector('[data-fin-price]');input(field,'');
  for(const digit of '3333333333')input(field,field.value+digit);
- assert.equal(field.value,'3.333.333.333');assert.match(h.el('financeBuild').textContent,/v6\.4/);
+ assert.equal(field.value,'3.333.333.333');assert.match(h.el('financeBuild').textContent,/v7\.0/);
  h.fire('saveFinance');const raw=h.context.localStorage.getItem(KEY);assert.equal(JSON.parse(raw).sites[0].finance.rows[0].clientPrice,3333333333);
  const reloaded=await load({[KEY]:raw});reloaded.run("openDetail('s1');openFinance()");assert.equal(reloaded.el('financeSections').querySelector('[data-fin-price]').value,'3.333.333.333');
 });
@@ -128,8 +128,8 @@ test('service worker never substitutes old cached JS for a new version and preca
  const context={URL,Request,Response,self:{registration:{scope},location:{origin:'https://example.test'},addEventListener:(name,fn)=>listeners[name]=fn},caches:{open:async()=>cache},fetch:async(req,opts)=>{network.push([req.url,opts]);return new Response('NEW');}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../sw.js'),'utf8'),context);
  let promise;listeners.install({waitUntil:p=>promise=p});await promise;
- assert.ok(installed.some(r=>r.url===scope+'assets/js/app.js?v=20260922.64'&&r.cache==='reload'));
- const req=new Request(scope+'assets/js/app.js?v=20260922.64');listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
+ assert.ok(installed.some(r=>r.url===scope+'assets/js/app.js?v=20260922.70'&&r.cache==='reload'));
+ const req=new Request(scope+'assets/js/app.js?v=20260922.70');listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
  listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
- let version;listeners.message({data:{type:'GET_VERSION'},ports:[{postMessage:v=>version=v}]});assert.equal(version,'6.4');
+ let version;listeners.message({data:{type:'GET_VERSION'},ports:[{postMessage:v=>version=v}]});assert.equal(version,'7.0');
 });

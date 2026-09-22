@@ -1,8 +1,17 @@
 {
   "name": "trackers-workspace",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "private": true,
-  "description": "Trackers Workspace: functional repair and reference UI",
-  "scripts": {"start": "node server.cjs", "test": "node --test tests/regression.test.cjs"},
-  "engines": {"node": ">=24"}
+  "description": "Trackers Workspace v7 daily operations and shared team workspace",
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "test:security": "node tests/security.verify.cjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
 }

@@ -73,7 +73,7 @@ function makeHarness(initial={},opts={}){
  const timers=new Map();let tid=0;const events={},alerts=[],downloads=[];
  const session=opts.session||null;const requests=[];let cloudRow=opts.cloudRow??null;
  const client={auth:{getSession:async()=>({data:{session}}),onAuthStateChange(fn){client.auth.listener=fn;return {data:{subscription:{unsubscribe(){}}}};},signOut:async()=>({error:null}),signInWithPassword:async()=>({data:{session}}),resetPasswordForEmail:async()=>({error:null}),updateUser:async()=>({error:null})},
-  from(table){const q={select(){return q},eq(){return q},maybeSingle:async()=>opts.readError?{error:{message:'network unavailable'}}:{data:table==='profiles'?{user_id:session?.user.id,email:'test@example.invalid',role:'owner',access_enabled:opts.access!==false}:cloudRow}};return q;},
+  from(table){const q={select(){return q},eq(){return q},maybeSingle:async()=>opts.readError?{error:{message:'network unavailable'}}:{data:table==='profiles'?{user_id:session?.user.id,email:'test@example.invalid',role:opts.role||'owner',workspace_owner_id:opts.workspaceOwner||null,access_enabled:opts.access!==false}:cloudRow}};return q;},
   async rpc(name,args){requests.push({name,args});if(opts.rpcError)return {error:{message:opts.rpcError}};if(name==='trackers_save_state'){if((cloudRow?.updated_at||null)!==args.expected_updated_at)return {data:{ok:false,updated_at:cloudRow?.updated_at}};cloudRow={snapshot:args.new_snapshot,updated_at:'2026-09-20T15:00:'+String(requests.length).padStart(2,'0')+'.000Z'};return {data:{ok:true,updated_at:cloudRow.updated_at}};}return {data:[]};}
  };
  const context={console,document,getComputedStyle:el=>({getPropertyValue:k=>el.style[k]||''}),localStorage:new Storage(initial),TextEncoder,TextDecoder,DataView,Uint8Array,Blob,Response,DecompressionStream,URL,Intl,Date,JSON,Promise,Array,Object,Number,String,Math,Map,Set,RegExp,Error,Boolean,parseInt,isNaN,structuredClone,
@@ -87,7 +87,7 @@ function makeHarness(initial={},opts={}){
  };
  context.window=context;vm.createContext(context);
  const run=code=>vm.runInContext(code,context);
- for(const file of ['storage-guard','core','sheets','config','cloud','pkbon','app','workspace','boot'])vm.runInContext(fs.readFileSync(path.join(rootPath,'assets/js/'+file+'.js'),'utf8'),context,{filename:file+'.js'});
+ for(const file of ['storage-guard','core','operations-core','sheets','config','cloud','pkbon','app','workspace','operations','boot'])vm.runInContext(fs.readFileSync(path.join(rootPath,'assets/js/'+file+'.js'),'utf8'),context,{filename:file+'.js'});
  const flush=async()=>{for(let loop=0;loop<12;loop++){await Promise.resolve();const pending=[...timers].filter(([,v])=>v.ms<100);if(!pending.length){await Promise.resolve();continue;}for(const [id,v]of pending){timers.delete(id);await v.fn();}}};
  return {context,document,run,flush,alerts,requests,client,setCloudRow:r=>{cloudRow=r},getCloudRow:()=>cloudRow,el:id=>document.getElementById(id),fire:(id,type='click')=>document.getElementById(id).dispatchEvent({type}),Storage};
 }

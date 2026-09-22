@@ -73,14 +73,17 @@ async function cloudPush(reason='manual'){
   if(!cloudReady||cloudConflict||!cloudSession||!cloudClient||currentAccessProfile?.access_enabled!==true)return false;
   if(typeof workspaceStale!=='undefined'&&workspaceStale)return false;
   if(cloudBusy){scheduleCloudPush(reason);return false;}
-  cloudBusy=true;const userId=cloudSession.user.id;
+  if(typeof opsCanEdit==='function'&&!opsCanEdit()){cloudSetStatus('online','Baca saja','Viewer: perubahan tidak dapat dikirim.');return false;}
+  cloudBusy=true;const userId=cloudIdentity();
   const localVersion=localStorage.getItem(CLOUD_CHANGE_KEY);
   cloudSetStatus('syncing','Sync','Mengirim perubahan...');
   try{
+    if(!await ensureCurrentUserAccess()||cloudIdentity()!==userId)throw new Error('Akses atau workspace berubah. Login ulang sebelum melanjutkan.');
+    if(typeof opsCanEdit==='function'&&!opsCanEdit())throw new Error('Akun sekarang hanya baca.');
     const snap=cloudSnapshot();
     const {data,error}=await authTimeout(cloudClient.rpc('trackers_save_state',{new_snapshot:snap,expected_updated_at:cloudBase}),15000);
     if(error)throw error;
-    if(cloudSession?.user.id!==userId)return false;
+    if(cloudIdentity()!==userId)return false;
     if(!data?.ok){cloudConflictDialog();return false;}
     cloudBase=data.updated_at;localStorage.setItem(CLOUD_BASE_KEY,cloudBase);localStorage.setItem(CLOUD_SYNCED_USER_KEY,userId);
     if(localStorage.getItem(CLOUD_CHANGE_KEY)===localVersion)localStorage.removeItem(CLOUD_DIRTY_KEY);
@@ -92,23 +95,25 @@ async function cloudPush(reason='manual'){
     cloudSetStatus('error','Gagal','Perubahan lokal tetap tersimpan. '+setup);return false;
   }finally{cloudBusy=false;if(cloudReady&&!cloudConflict&&localStorage.getItem(CLOUD_CHANGE_KEY)!==localVersion)scheduleCloudPush('changes-during-sync');}
 }
+function cloudWorkspaceId(){return currentAccessProfile?.workspace_owner_id||cloudSession?.user.id;}
+function cloudIdentity(){const user=cloudSession?.user.id,owner=cloudWorkspaceId();return owner&&owner!==user?user+':'+owner:user;}
 async function cloudGetRow(){
   if(!cloudSession||!cloudClient)return null;
-  const {data,error}=await authTimeout(cloudClient.from(CLOUD_TABLE).select('snapshot,updated_at').eq('user_id',cloudSession.user.id).maybeSingle(),15000);
+  const {data,error}=await authTimeout(cloudClient.from(CLOUD_TABLE).select('snapshot,updated_at').eq('user_id',cloudWorkspaceId()).maybeSingle(),15000);
   if(error)throw error;return data||null;
 }
 function cloudReloadFromSnapshot(snapshot,updatedAt){
   if(!cloudApplySnapshot(snapshot))return;
   localStorage.setItem(CLOUD_BASE_KEY,updatedAt||'');localStorage.removeItem(CLOUD_DIRTY_KEY);
   localStorage.setItem(CLOUD_LOCAL_UPDATED_KEY,updatedAt||new Date().toISOString());
-  localStorage.setItem(CLOUD_SYNCED_USER_KEY,cloudSession.user.id);location.reload();
+  localStorage.setItem(CLOUD_SYNCED_USER_KEY,cloudIdentity());location.reload();
 }
 async function cloudReconcile(){
   if(window.TRACKERS_CORRUPT_KEYS?.length){cloudSetStatus('error','Gagal','Data lokal tidak terbaca. Pulihkan backup sebelum sync.');return;}
   if(cloudReconciling||!cloudSession||!cloudClient||currentAccessProfile?.access_enabled!==true)return;
   cloudReconciling=true;cloudReady=false;cloudSetStatus('syncing','Sync','Mengecek versi data...');
   try{
-    const owner=localStorage.getItem(CLOUD_SYNCED_USER_KEY),userId=cloudSession.user.id;
+    const owner=localStorage.getItem(CLOUD_SYNCED_USER_KEY),userId=cloudIdentity();
     // Keep a separate local snapshot before switching accounts. Never upload another user's data.
     if(owner&&owner!==userId){
       const saved=localStorage.getItem('trackersAccount:'+userId);
@@ -123,6 +128,7 @@ async function cloudReconcile(){
     const row=await cloudGetRow(),base=localStorage.getItem(CLOUD_BASE_KEY)||null;
     const dirty=localStorage.getItem(CLOUD_DIRTY_KEY)==='1';
     cloudBase=base;
+    if(!row&&currentAccessProfile.role==='viewer'){cloudSetStatus('online','Baca saja','Workspace belum memiliki data. Minta admin menyinkronkan data.');return;}
     if(!row){cloudBase=null;cloudReady=true;localStorage.setItem(CLOUD_SYNCED_USER_KEY,userId);await cloudPush('first-upload');return;}
     if(!base){
       if(cloudHasLocalData()){
@@ -214,9 +220,9 @@ async function cloudHandleSession(session){
   if(!allowed)return;
 
   const owner=localStorage.getItem(CLOUD_SYNCED_USER_KEY);
-  if(!owner||owner===cloudSession.user.id)cloudShowAuth(false);
+  if(!owner||owner===cloudIdentity())cloudShowAuth(false);
   await cloudReconcile();
-  if(localStorage.getItem(CLOUD_SYNCED_USER_KEY)===cloudSession.user.id)cloudShowAuth(false)
+  if(localStorage.getItem(CLOUD_SYNCED_USER_KEY)===cloudIdentity())cloudShowAuth(false)
 }
 async function cloudInit(){
   const localMode=["file:","content:"].includes(location.protocol);
@@ -271,7 +277,7 @@ async function fetchCurrentAccessProfile(){
   if(!cloudClient||!cloudSession?.user)return null;
   const {data,error}=await authTimeout(cloudClient
     .from("profiles")
-    .select("user_id,email,full_name,role,access_enabled")
+    .select("*")
     .eq("user_id",cloudSession.user.id)
     .maybeSingle(),15000);
   if(error)throw error;
@@ -292,6 +298,7 @@ async function ensureCurrentUserAccess(){
         : roleLabel(currentAccessProfile.role)+" • Tidak dapat mengelola user"
     }
     cloudUpdateAccountUI();
+    window.trackersUpdateRoleUI?.();
     return true
   }catch(err){
     console.error(err);
@@ -348,7 +355,7 @@ async function loadAdminUsers(){
   wrap.innerHTML='<div class="admin-user-empty">Memuat user...</div>';
   const {data,error}=await cloudClient.rpc("trackly_admin_list_profiles");
   if(error){
-    wrap.innerHTML='<div class="admin-user-empty">Gagal memuat user. Pastikan SQL Supabase 001 dan 002 sudah dijalankan.</div>';
+    wrap.innerHTML='<div class="admin-user-empty">Gagal memuat user. Pastikan migrasi Supabase 004 sudah dijalankan.</div>';
     return
   }
   const rows=Array.isArray(data)?data:[];

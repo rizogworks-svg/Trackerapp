@@ -31,9 +31,11 @@ function notifyTracklyHistory(type='PKBON_CHANGED'){
 function saveJSON(k,v,silent=false){
   if(window.TRACKERS_CORRUPT_KEYS?.length){if(silent)return false;alert('Data lama tidak terbaca. Download data pemulihan dari Settings lalu restore backup yang valid.');throw new Error('CORRUPT_WORKSPACE');}
   if(typeof workspaceStale!=='undefined'&&workspaceStale){alert('Data berubah di tab lain. Muat ulang sebelum menyimpan.');throw new Error('STALE_WORKSPACE');}
+  if(!silent&&window.trackersUpdateRoleUI)opsAssertEdit();
   const data=JSON.stringify(v);
   if(localStorage.getItem(k)===data)return true;
-  try{TrackersCore.writeBatch(localStorage,[...(silent?[]:cloudChangeEntries()),[k,data]]);}
+  const auditEntries=window.trackersBeforePkbonWrite?.(k,v,silent)||[];
+  try{TrackersCore.writeBatch(localStorage,[...(silent?[]:cloudChangeEntries()),...auditEntries,[k,data]]);window.trackersAfterPkbonWrite?.();}
   catch(e){alert('Data belum tersimpan. Penyimpanan penuh. Download Backup dari Pengaturan PKBON.');throw e;}
   if(!silent)setTimeout(()=>notifyTracklyHistory('PKBON_CHANGED'),0);
   return true;
@@ -537,6 +539,7 @@ function applyTracklyTheme(t={}){
 
 function handleTracklyCommand(d={}){
   if(d.type==='TRACKLY_LINK_SITE'){
+    if(typeof opsCanEdit==='function'&&!opsCanEdit())return;
     const next=history.map(doc=>!doc.workspaceSiteId&&TrackersCore.belongs(doc,d.site,d.sites)?{...doc,workspaceSiteId:d.site.id}:doc);
     if(next.some((doc,i)=>doc!==history[i])){saveJSON('pkbon_history',next);history=next;notifyTracklyHistory('PKBON_HISTORY');}
   }
