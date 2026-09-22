@@ -1,13 +1,14 @@
 /* Scope-local caches; never cache account/API responses. */
 const CACHE_PREFIX='trackers:'+new URL(self.registration.scope).pathname+':';
-const CACHE_NAME=CACHE_PREFIX+'v7.0';
+const CACHE_NAME=CACHE_PREFIX+'v7.2';
 const APP_SHELL=['./','./index.html','./manifest.webmanifest','./assets/css/workspace.css',
  './assets/js/storage-guard.js','./assets/js/operations-core.js','./assets/js/operations.js','./assets/js/core.js','./assets/js/sheets.js','./assets/js/config.js','./assets/js/cloud.js','./assets/js/pkbon.js','./assets/js/app.js','./assets/js/workspace.js','./assets/js/boot.js',
  ...['trackers-logo','trackers-logo-dark','dashboard','project','documentation','accounting','notes','report','settings','account','magnifying-glass','icon-192','icon-512','icon-maskable-512'].map(n=>'./assets/img/'+n+'.png')];
-const VERSIONED_SHELL=APP_SHELL.map(p=>p==='./'||p==='./index.html'?p:p+'?v=20260922.70');
+APP_SHELL.push('./assets/js/icons.js','./assets/css/material-icons.css',...["dashboard", "folder", "description", "receipt_long", "bar_chart", "settings", "account_circle", "search", "edit_note", "calendar_clock", "notifications", "bolt", "checklist", "payments", "add", "close", "check", "arrow_outward", "chevron_right", "upload", "download", "keep", "list_alt", "note_add", "sticky_note_2", "sync", "delete", "edit", "share", "archive", "unarchive", "print", "table_view", "history", "refresh", "save", "group", "palette", "cloud_download", "install_desktop", "apartment", "person", "flag"].map(n=>'./assets/icons/material/'+n+'.svg'));
+const VERSIONED_SHELL=APP_SHELL.map(p=>p==='./'||p==='./index.html'||p.includes('/icons/material/')?p:p+'?v=20260922.72');
 const LIBRARIES=new Set(['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js','https://unpkg.com/@supabase/supabase-js@2.57.4/dist/umd/supabase.js','https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js']);
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(VERSIONED_SHELL.map(p=>new Request(new URL(p,self.registration.scope),{cache:'reload'}))))));
-self.addEventListener('message',e=>{if(e.data?.type==='SKIP_WAITING')self.skipWaiting();if(e.data?.type==='GET_VERSION')e.ports[0]?.postMessage('7.0');});
+self.addEventListener('message',e=>{if(e.data?.type==='SKIP_WAITING')self.skipWaiting();if(e.data?.type==='GET_VERSION')e.ports[0]?.postMessage('7.2');});
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith(CACHE_PREFIX)&&k!==CACHE_NAME).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
  const req=e.request,url=new URL(req.url);if(req.method!=='GET')return;

@@ -122,7 +122,7 @@ function renderRows(){
   const tb=$('#itemRows');tb.innerHTML='';
   state.items.forEach((it,i)=>{
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${i+1}</td><td><input data-k="uraian" data-i="${i}" value="${attr(it.uraian)}"></td><td><input data-k="sat" data-i="${i}" value="${attr(it.sat)}"></td><td><input data-k="vol" data-i="${i}" type="number" min="0" step="any" value="${Number(it.vol)||0}"></td><td><input data-k="harga" data-i="${i}" type="text" inputmode="numeric" autocomplete="off" value="${formatRupiahInput(it.harga)}" placeholder="0"></td><td class="row-total">${fmt((Number(it.vol)||0)*(Number(it.harga)||0))}</td><td><input data-k="keterangan" data-i="${i}" value="${attr(it.keterangan)}"></td><td><button class="remove" data-remove="${i}">×</button></td>`;
+    tr.innerHTML=`<td>${i+1}</td><td><input data-k="uraian" data-i="${i}" value="${attr(it.uraian)}"></td><td><input data-k="sat" data-i="${i}" value="${attr(it.sat)}"></td><td><input data-k="vol" data-i="${i}" type="number" min="0" step="any" value="${Number(it.vol)||0}"></td><td><input data-k="harga" data-i="${i}" type="text" inputmode="numeric" autocomplete="off" value="${formatRupiahInput(it.harga)}" placeholder="0"></td><td class="row-total">${fmt((Number(it.vol)||0)*(Number(it.harga)||0))}</td><td><input data-k="keterangan" data-i="${i}" value="${attr(it.keterangan)}"></td><td><button class="remove" aria-label="Hapus baris" data-remove="${i}">${uiIcon('close')}</button></td>`;
     tb.appendChild(tr);
   });
   $$('#itemRows input').forEach(e=>e.oninput=ev=>{

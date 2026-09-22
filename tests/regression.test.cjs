@@ -116,7 +116,7 @@ test('PERKUATAN screenshot case types 3333333333 and retains billions after save
  const h=await load();state(h).sites[0].workType='PERKUATAN';h.run("openDetail('s1');openFinance()");
  const field=h.el('financeSections').querySelector('[data-fin-price]');input(field,'');
  for(const digit of '3333333333')input(field,field.value+digit);
- assert.equal(field.value,'3.333.333.333');assert.match(h.el('financeBuild').textContent,/v7\.0/);
+ assert.equal(field.value,'3.333.333.333');assert.match(h.el('financeBuild').textContent,/v7\.2/);
  h.fire('saveFinance');const raw=h.context.localStorage.getItem(KEY);assert.equal(JSON.parse(raw).sites[0].finance.rows[0].clientPrice,3333333333);
  const reloaded=await load({[KEY]:raw});reloaded.run("openDetail('s1');openFinance()");assert.equal(reloaded.el('financeSections').querySelector('[data-fin-price]').value,'3.333.333.333');
 });
@@ -128,8 +128,8 @@ test('service worker never substitutes old cached JS for a new version and preca
  const context={URL,Request,Response,self:{registration:{scope},location:{origin:'https://example.test'},addEventListener:(name,fn)=>listeners[name]=fn},caches:{open:async()=>cache},fetch:async(req,opts)=>{network.push([req.url,opts]);return new Response('NEW');}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../sw.js'),'utf8'),context);
  let promise;listeners.install({waitUntil:p=>promise=p});await promise;
- assert.ok(installed.some(r=>r.url===scope+'assets/js/app.js?v=20260922.70'&&r.cache==='reload'));
- const req=new Request(scope+'assets/js/app.js?v=20260922.70');listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
+ assert.ok(installed.some(r=>r.url===scope+'assets/js/app.js?v=20260922.72'&&r.cache==='reload'));
+ const req=new Request(scope+'assets/js/app.js?v=20260922.72');listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
  listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
- let version;listeners.message({data:{type:'GET_VERSION'},ports:[{postMessage:v=>version=v}]});assert.equal(version,'7.0');
+ let version;listeners.message({data:{type:'GET_VERSION'},ports:[{postMessage:v=>version=v}]});assert.equal(version,'7.2');
 });

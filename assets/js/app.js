@@ -758,7 +758,7 @@ function renderBastProcesses(){
       </div>
       <div class="bast-task">TASK ID · <b>${esc(r.taskId||"-")}</b></div>
       <div class="bast-stage-list">
-        ${p.stages.map(x=>`<div class="bast-stage-row"><span class="bast-stage-name">${x.name}</span><span class="bast-stage-state">${esc(x.state)}</span><span class="bast-stage-done">${x.done?"✓":"—"}</span></div>`).join("")}
+        ${p.stages.map(x=>`<div class="bast-stage-row"><span class="bast-stage-name">${x.name}</span><span class="bast-stage-state">${esc(x.state)}</span><span class="bast-stage-done">${x.done?uiIcon('check'):'—'}</span></div>`).join("")}
       </div>
       <div class="bast-card-actions">
         <button class="btn light small" type="button" data-bp-share="${r.id}">Share</button>
@@ -829,7 +829,7 @@ f.spmkNo.value=s.spmkNo||"";f.spmkDate.value=s.spmkDate||"";f.coordinate.value=s
 function openDetail(id){currentSite=id;route("detail")}
 function renderDetail(){
   const s=normalizeSiteModules(site(currentSite));if(!s)return route("sites");syncSiteBastFromProcess(s);const t=targetOf(s),d=deadline(s);
-  $("pinSite").classList.toggle("active",state.pinned.includes(s.id));$("pinSite").textContent=state.pinned.includes(s.id)?"★ Pinned":"☆ Pin";$("dProject").textContent=s.projectId;$("dName").textContent=s.siteName;$("dId").textContent=s.siteId;$("dClient").textContent=s.client||"-";$("dClientSiteId").textContent=s.clientSiteId||"-";$("dTenant").textContent=s.tenant||"-";$("dTowerHeight").textContent=s.towerHeight?`${s.towerHeight} m`:"-";$("dRegion").textContent=s.region||"-";$("dWork").textContent=s.workType||"-";$("dSpmk").textContent=s.spmkNo||"-";$("dDate").textContent=fmt(s.spmkDate);$("dTarget").textContent=t.sacme
+  $("pinSite").classList.toggle("active",state.pinned.includes(s.id));$("pinSite").innerHTML=uiIcon("keep")+(state.pinned.includes(s.id)?" Pinned":" Pin");$("dProject").textContent=s.projectId;$("dName").textContent=s.siteName;$("dId").textContent=s.siteId;$("dClient").textContent=s.client||"-";$("dClientSiteId").textContent=s.clientSiteId||"-";$("dTenant").textContent=s.tenant||"-";$("dTowerHeight").textContent=s.towerHeight?`${s.towerHeight} m`:"-";$("dRegion").textContent=s.region||"-";$("dWork").textContent=s.workType||"-";$("dSpmk").textContent=s.spmkNo||"-";$("dDate").textContent=fmt(s.spmkDate);$("dTarget").textContent=t.sacme
     ? `SITAC ${t.sacme.sitacDays}h${t.sacme.sitacDate?" ("+fmt(t.sacme.sitacDate)+")":""} • IMB ${t.sacme.imbDays}h${t.sacme.imbDate?" ("+fmt(t.sacme.imbDate)+")":""} • CME ${t.sacme.cmeDays}h${t.sacme.cmeDate?" ("+fmt(t.sacme.cmeDate)+")":""}`
     : (t.date?fmt(t.date)+" • "+t.days+" hari":"Belum diatur");$("dCoord").textContent=s.coordinate||"-";$("dAddress").textContent=s.address||"-";$("dBadge").className="badge "+d.cls;$("dBadge").textContent=d.label;
   const p=s.pln||{};$("plnSub").textContent=p.status&&p.status!=="Belum"?p.status+(p.power?" • "+p.power:""):"Belum ada data";
@@ -1205,7 +1205,7 @@ function renderFinance(){
     return `<section class="finance-section">
       <div class="finance-section-head">
         <strong>${esc(section)}</strong>
-        <button type="button" class="btn light small" data-fin-add="${esc(section)}">＋ Addwork</button>
+        <button type="button" class="btn light small" data-fin-add="${esc(section)}">${uiIcon('add')} Addwork</button>
       </div>
       <div class="finance-table-wrap">
         <table class="finance-table finance-table-v38">
@@ -1243,7 +1243,7 @@ function renderFinance(){
                   <strong class="${financeResultClass(margin)}">${financeSignedRupiah(margin)}</strong>
                 </td>
                 <td data-label="">${r.type==="addwork"
-                  ? `<button type="button" class="finance-remove" data-fin-remove="${r.id}" title="Hapus Addwork">×</button>`
+                  ? `<button type="button" class="finance-remove" data-fin-remove="${r.id}" title="Hapus Addwork">${uiIcon('close')}</button>`
                   : ""}</td>
               </tr>`
             }).join("")}
@@ -1279,7 +1279,7 @@ function renderFinance(){
   updateFinanceTotals()
 }
 function openFinance(){
-  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.0 • sampai miliaran dan triliunan";
+  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.2 • sampai miliaran dan triliunan";
   const s=normalizeSiteModules(site(currentSite));if(!s)return;
   $("financeDueDate").value=s.finance.dueDate||"";
   prepareFinanceDraft(s);
@@ -1327,7 +1327,7 @@ function renderFinancePayment(){
           <span>Keterangan</span>
           <input data-fin-pay-note="${p.id}" value="${esc(p.note||"")}" placeholder="Opsional">
         </label>
-        <button type="button" class="finance-remove finance-payment-delete" data-fin-pay-del="${p.id}">×</button>
+        <button type="button" class="finance-remove finance-payment-delete" aria-label="Hapus pembayaran" data-fin-pay-del="${p.id}">${uiIcon('close')}</button>
       </div>`).join("")
     : `<div class="finance-payment-empty">Belum ada pembayaran Client untuk item ini.</div>`;
 
@@ -1405,8 +1405,8 @@ function renderBast(){
       : (x.done?"Selesai":locked?"Selesaikan tahap sebelumnya":"Siap diproses");
 
     const button=synced
-      ? `<button class="bastbtn ${x.done?"done":""}" type="button" disabled>${x.done?"✓ Done":"Sync"}</button>`
-      : `<button class="bastbtn ${x.done?"done":""}" data-bi="${i}" ${locked?"disabled":""}>${x.done?"✓ Selesai":"Tandai Selesai"}</button>`;
+      ? `<button class="bastbtn ${x.done?"done":""}" type="button" disabled>${x.done?uiIcon('check')+' Done':uiIcon('sync')+' Sync'}</button>`
+      : `<button class="bastbtn ${x.done?"done":""}" data-bi="${i}" ${locked?"disabled":""}>${x.done?uiIcon('check')+' Selesai':'Tandai Selesai'}</button>`;
 
     return `<div class="checkrow">
       <div><h4>${i+1}. ${x.label}</h4><span class="muted">${sourceText}</span></div>
