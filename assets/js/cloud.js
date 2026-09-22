@@ -31,9 +31,9 @@ function cloudSetStatus(mode,label,sub=""){
     local:"Belum Terhubung",
     syncing:"Menyinkronkan...",
     online:"Tersinkron",
-    error:"Gagal Sinkron"
+    error:"Gagal Sinkron",paused:"Sinkronisasi ditunda"
   }[mode]||label||"";
-  const indicator=$('syncIndicator');if(indicator){indicator.textContent={local:'Lokal',syncing:'Sync…',online:'Tersinkron',error:'Periksa sync'}[mode]||label;indicator.dataset.mode=mode;indicator.title=sub||syncLabel;indicator.setAttribute('aria-label',syncLabel+'. '+sub);}
+  const indicator=$('syncIndicator');if(indicator){indicator.textContent={local:'Lokal',syncing:'Sync…',online:'Tersinkron',error:'Periksa sync',paused:'Sync ditunda'}[mode]||label;indicator.dataset.mode=mode;indicator.title=sub||syncLabel;indicator.setAttribute('aria-label',syncLabel+'. '+sub);}
   if($("cloudSyncStatus"))$("cloudSyncStatus").textContent=syncLabel;
   if($("cloudSyncTime")&&sub)$("cloudSyncTime").textContent=sub
 }
@@ -63,8 +63,23 @@ function scheduleCloudPush(reason='change'){
   if(cloudApplying||!cloudReady||cloudConflict||!cloudSession||!cloudClient)return;
   cloudPushTimer=setTimeout(()=>cloudPush(reason),1200);
 }
-function cloudConflictDialog(){
+const CLOUD_DEFER_KEY='trackersDeferredConflictV1';
+function cloudConflictDeferred(){return !!cloudSession&&localStorage.getItem(CLOUD_DEFER_KEY)===cloudIdentity();}
+function cloudMarkConflictDeferred(){
   cloudConflict=true;cloudReady=false;clearTimeout(cloudPushTimer);
+  localStorage.setItem(CLOUD_DEFER_KEY,cloudIdentity());
+  cloudSetStatus('paused','Ditunda','Sinkronisasi ditunda. Perubahan tetap di perangkat. Klik status sync untuk memilih versi data.');
+}
+function cloudClearConflictDeferred(){localStorage.removeItem(CLOUD_DEFER_KEY);}
+function cloudComparable(snapshot){
+  const ordered=v=>Array.isArray(v)?v.map(ordered):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,ordered(v[k])])):v;
+  return JSON.stringify(ordered({trackly:snapshot.trackly,pkbon:snapshot.pkbon||{}}));
+}
+function cloudConflictDialog(force=false){
+  cloudConflict=true;cloudReady=false;clearTimeout(cloudPushTimer);
+  if(cloudConflictDeferred()&&!force){cloudMarkConflictDeferred();return;}
+  if(force)cloudClearConflictDeferred();
+  $('useLocalForCloud').disabled=typeof opsCanEdit==='function'&&!opsCanEdit();
   openModal('cloudConflictModal');
   cloudSetStatus('error','Konflik','Data cloud dan perangkat berbeda. Pilih sumber data.');
 }
@@ -104,11 +119,13 @@ async function cloudGetRow(){
 }
 function cloudReloadFromSnapshot(snapshot,updatedAt){
   if(!cloudApplySnapshot(snapshot))return;
+  cloudClearConflictDeferred();
   localStorage.setItem(CLOUD_BASE_KEY,updatedAt||'');localStorage.removeItem(CLOUD_DIRTY_KEY);
   localStorage.setItem(CLOUD_LOCAL_UPDATED_KEY,updatedAt||new Date().toISOString());
   localStorage.setItem(CLOUD_SYNCED_USER_KEY,cloudIdentity());location.reload();
 }
 async function cloudReconcile(){
+  if(cloudConflictDeferred()){cloudMarkConflictDeferred();return;}
   if(window.TRACKERS_CORRUPT_KEYS?.length){cloudSetStatus('error','Gagal','Data lokal tidak terbaca. Pulihkan backup sebelum sync.');return;}
   if(cloudReconciling||!cloudSession||!cloudClient||currentAccessProfile?.access_enabled!==true)return;
   cloudReconciling=true;cloudReady=false;cloudSetStatus('syncing','Sync','Mengecek versi data...');
@@ -130,8 +147,13 @@ async function cloudReconcile(){
     cloudBase=base;
     if(!row&&currentAccessProfile.role==='viewer'){cloudSetStatus('online','Baca saja','Workspace belum memiliki data. Minta admin menyinkronkan data.');return;}
     if(!row){cloudBase=null;cloudReady=true;localStorage.setItem(CLOUD_SYNCED_USER_KEY,userId);await cloudPush('first-upload');return;}
+    // A retry after an acknowledged write must not conflict solely on key order or timestamp.
+    if(cloudComparable(row.snapshot)===cloudComparable(cloudSnapshot())){
+      cloudBase=row.updated_at;TrackersCore.writeBatch(localStorage,[[CLOUD_BASE_KEY,cloudBase],[CLOUD_DIRTY_KEY,null],[CLOUD_SYNCED_USER_KEY,userId]]);
+      cloudConflict=false;cloudReady=true;cloudClearConflictDeferred();cloudSetStatus('online','Tersinkron','Data sudah sinkron.');return;
+    }
     if(!base){
-      if(cloudHasLocalData()){
+      if(cloudHasLocalData()){ 
         // Upgrade from old versions: identical snapshots need no user decision.
         const current=cloudSnapshot();
         if(JSON.stringify(row.snapshot.trackly)!==JSON.stringify(current.trackly)||JSON.stringify(row.snapshot.pkbon||{})!==JSON.stringify(current.pkbon)){cloudConflictDialog();return;}

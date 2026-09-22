@@ -3,7 +3,7 @@ let taskDraft=[];
 let workspaceStale=false;
 let lastModalFocus=new Map();
 let modalSequence=400;
-const lockedModals=new Set(['cloudConflictModal','accessDeniedModal','resetPasswordModal']);
+const lockedModals=new Set(['accessDeniedModal','resetPasswordModal']);
 function renderDetailExtras(s){
   $('dProjectInfo').textContent=s.projectId||'—';$('dSiteInfo').textContent=s.siteId||'—';
   const bp=latestBastProcessForSite(s.id);
@@ -65,7 +65,7 @@ const originalRenderOneflux=renderOneflux;
 renderOneflux=function(){originalRenderOneflux();$('onefluxList').querySelectorAll('.of-row').forEach((row,i)=>{if(!onefluxDraft[i]?.custom)return;const b=document.createElement('button');b.type='button';b.className='rowbtn';b.textContent='Hapus item';b.onclick=()=>{onefluxDraft.splice(i,1);renderOneflux();};row.querySelector('.of-copy').appendChild(b);});};
 const oldCloseModal=closeModal;
 openModal=function(id){const m=$(id);if(!m)return;lastModalFocus.set(id,document.activeElement);m.style.zIndex=++modalSequence;m.classList.add('open');m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');const heading=m.querySelector('h2');if(heading){if(!heading.id)heading.id=id+'Heading';m.setAttribute('aria-labelledby',heading.id);}document.body.style.overflow='hidden';setTimeout(()=>m.querySelector('input:not([type=hidden]):not([disabled]),select,textarea,button')?.focus(),0);};
-closeModal=function(id){oldCloseModal(id);lastModalFocus.get(id)?.focus();lastModalFocus.delete(id);if(id==='financePaymentModal')renderFinance();};
+closeModal=function(id){if(id==='cloudConflictModal'&&cloudConflict)cloudMarkConflictDeferred();oldCloseModal(id);lastModalFocus.get(id)?.focus();lastModalFocus.delete(id);if(id==='financePaymentModal')renderFinance();};
 document.querySelectorAll('.modalbg').forEach(m=>m.onclick=e=>{if(e.target===m&&!lockedModals.has(m.id))closeModal(m.id);});
 // Capture Escape first so only the top dialog closes; never dismiss an access gate.
 document.addEventListener('keydown',e=>{
@@ -79,7 +79,7 @@ function downloadRawRecovery(){const keys=[KEY,...PKBON_CLOUD_KEYS],raw=Object.f
 $('backupWorkspaceRow').onclick=()=>openModal('backupWorkspaceModal');
 $('downloadWorkspaceBackup').onclick=downloadWorkspaceBackup;
 $('backupConflict').onclick=downloadWorkspaceBackup;
-$('syncIndicator').onclick=()=>{if(!cloudSession){cloudShowAuth(true);return;}cloudUpdateAccountUI();openModal('cloudAccountModal');};
+$('syncIndicator').onclick=()=>{if(cloudSession&&cloudConflict){cloudConflictDialog(true);return;}if(!cloudSession){cloudShowAuth(true);return;}cloudUpdateAccountUI();openModal('cloudAccountModal');};
 $('restoreWorkspaceFile').onchange=async e=>{
   const file=e.target.files?.[0];if(!file)return;
   try{if(file.size>40*1024*1024)throw new Error('Backup melebihi 40 MB.');const snapshot=TrackersCore.validateSnapshot(JSON.parse(await file.text()));if(!confirm('Pulihkan backup? Seluruh data kerja perangkat ini akan diganti. Download backup saat ini dahulu bila diperlukan.'))return;

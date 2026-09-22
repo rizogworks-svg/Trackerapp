@@ -182,12 +182,18 @@ const THEMES={
     name:"Trackers Green",tone1:"#7fbd67",tone2:"#20363b",
     bg:"#7fbd67",sidebar:"#7fbd67",panel:"#c8e18f",card:"#e2efcf",hover:"#d6e9bd",
     line:"#536d63",text:"#20363b",muted:"#5d756d",accent:"#7fbd67",danger:"#ad302b",mode:"light"
-  }
+  },
+  ocean:{"name": "Ocean Blue", "tone1": "#83b9e6", "tone2": "#17334d", "bg": "#83b9e6", "sidebar": "#83b9e6", "workspace": "#edf5fc", "panel": "#d9eafa", "card": "#f5f9fe", "hover": "#c8e0f5", "line": "#53738e", "text": "#17334d", "muted": "#496478", "accent": "#9dcaf0", "danger": "#aa302e", "mode": "light"},
+  lavender:{"name": "Soft Lavender", "tone1": "#b9a4df", "tone2": "#342547", "bg": "#b9a4df", "sidebar": "#b9a4df", "workspace": "#f2edf9", "panel": "#e4d9f2", "card": "#faf7fd", "hover": "#daceeb", "line": "#78628d", "text": "#342547", "muted": "#695578", "accent": "#c9b1eb", "danger": "#aa303e", "mode": "light"},
+  sand:{"name": "Warm Sand", "tone1": "#d6b78b", "tone2": "#493424", "bg": "#d6b78b", "sidebar": "#d6b78b", "workspace": "#f8f0e4", "panel": "#eee0c8", "card": "#fffaf1", "hover": "#e6d4b8", "line": "#8a7050", "text": "#493424", "muted": "#74604a", "accent": "#e3bd87", "danger": "#a22f2f", "mode": "light"},
+  navy:{"name": "Navy Sky", "tone1": "#0d1c30", "tone2": "#8fcaff", "bg": "#0d1c30", "sidebar": "#11233b", "workspace": "#14253a", "panel": "#1b3049", "card": "#223b57", "hover": "#2d4b69", "line": "#617e9d", "text": "#edf5ff", "muted": "#bdcddd", "accent": "#8fcaff", "danger": "#ffaba7", "mode": "dark"},
+  graphite:{"name": "Graphite Rose", "tone1": "#211d26", "tone2": "#f1adc4", "bg": "#211d26", "sidebar": "#27212e", "workspace": "#2a2431", "panel": "#342c3c", "card": "#403448", "hover": "#51405b", "line": "#917d9b", "text": "#faf1fc", "muted": "#dac5df", "accent": "#f1adc4", "danger": "#ffaaa0", "mode": "dark"}
 };
 function applyTheme(){
   const t=THEMES[state.theme]||THEMES.light,r=document.documentElement.style;
   r.setProperty("--tone1",t.bg);r.setProperty("--tone2",t.text);
   r.setProperty("--tone1-soft",t.panel);r.setProperty("--tone2-soft",t.card);
+  r.setProperty("--workspace",t.workspace||(state.theme==="midnight"?"#181f1b":"#e1efce"));
   r.setProperty("--bg",t.bg);r.setProperty("--sidebar",t.sidebar);r.setProperty("--panel",t.panel);
   r.setProperty("--card",t.card);r.setProperty("--hover",t.hover);r.setProperty("--text",t.text);
   r.setProperty("--muted",t.muted);r.setProperty("--line",t.line);r.setProperty("--accent",t.accent);
@@ -236,7 +242,7 @@ function load(){
       rules:Array.isArray(r.rules)?r.rules:[],
       auditTrail:Array.isArray(r.auditTrail)?r.auditTrail:[],
       activities:Array.isArray(r.activities)?r.activities:[],
-      theme:(r.theme==="midnight"?"midnight":"light"),
+      theme:(["light","midnight","ocean","lavender","sand","navy","graphite"].includes(r.theme)?r.theme:"light"),
       pinned:Array.isArray(r.pinned)?r.pinned:[],
       tenants:Array.isArray(r.tenants)?r.tenants:[],
       lastNotificationSeen:r.lastNotificationSeen||"",
@@ -1279,7 +1285,7 @@ function renderFinance(){
   updateFinanceTotals()
 }
 function openFinance(){
-  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.2 • sampai miliaran dan triliunan";
+  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.4 • sampai miliaran dan triliunan";
   const s=normalizeSiteModules(site(currentSite));if(!s)return;
   $("financeDueDate").value=s.finance.dueDate||"";
   prepareFinanceDraft(s);
@@ -1649,17 +1655,24 @@ $("refreshAdminUsers").onclick=()=>loadAdminUsers();
 
 $("cloudSyncNow").onclick=async()=>{
   if(!cloudSession){closeModal("cloudAccountModal");cloudShowAuth(true);return}
+  cloudClearConflictDeferred();
+  if(cloudConflict){cloudConflictDialog(true);return;}
   await cloudReconcile();
 };
 $("cloudSignOut").onclick=()=>cloudSignOut();
 $("useLocalForCloud").onclick=async()=>{
-  try{const row=await cloudGetRow();cloudBase=row?.updated_at||null;cloudConflict=false;cloudReady=true;const ok=await cloudPush('conflict-use-local');if(ok){closeModal('cloudConflictModal');cloudShowAuth(false);}}catch(err){toast('Sinkronisasi gagal: '+err.message);}
+  if(typeof opsCanEdit==='function'&&!opsCanEdit())return toast('Akun ini hanya dapat menggunakan data cloud.');
+  const button=$('useLocalForCloud');button.disabled=true;
+  try{const row=await cloudGetRow();cloudBase=row?.updated_at||null;cloudClearConflictDeferred();cloudConflict=false;cloudReady=true;
+    const ok=await cloudPush('conflict-use-local');
+    if(ok){closeModal('cloudConflictModal');cloudShowAuth(false);}
+    else{cloudConflict=true;cloudReady=false;toast('Belum berhasil mengirim data. Data lokal tetap tersimpan.');}
+  }catch(err){cloudConflict=true;cloudReady=false;toast('Sinkronisasi gagal: '+err.message);}
+  finally{button.disabled=typeof opsCanEdit==='function'&&!opsCanEdit();}
 };
 $("useCloudForLocal").onclick=async()=>{
-  try{
-    const row=await cloudGetRow();
-    if(row)cloudReloadFromSnapshot(row.snapshot,row.updated_at)
-  }catch(err){toast("Gagal mengambil data cloud")}
+  try{const row=await cloudGetRow();if(row)cloudReloadFromSnapshot(row.snapshot,row.updated_at);else toast('Data cloud belum tersedia. Data perangkat tetap disimpan.');}
+  catch(err){toast('Gagal mengambil data cloud: '+err.message);}
 };
 
 // PKBON is a native Trackly module and saves independently.
@@ -1681,7 +1694,7 @@ $("targetSettingRow").onclick=()=>{renderTargetSettingsList();openModal("targetS
 function emptyWorkspaceStatePreservingTheme(){
   return{
     sites:[],clients:[],rules:[],activities:[],
-    theme:state.theme==="light"?"light":"midnight",
+    theme:THEMES[state.theme]?state.theme:"light",
     pinned:[],tenants:[],lastNotificationSeen:"",bastProcesses:[],notes:[]
   }
 }
