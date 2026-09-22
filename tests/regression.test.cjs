@@ -89,3 +89,47 @@ test('legacy tasks without dates remain editable and invalid dates cannot replac
  input(h.el('taskEditor').querySelector('[data-task-date]'),'2026-02-31');h.fire('saveTasks');assert.equal(state(h).sites[0].tasks[0].date,undefined);assert.match(h.el('toast').textContent,/Tanggal pekerjaan tidak valid/);
  input(h.el('taskEditor').querySelector('[data-task-date]'),'2026-09-21');h.fire('saveTasks');assert.equal(h.el('dProgressPct').textContent,'100%');
 });
+
+test('all finance price fields including addwork accept large amounts and persist after reload',async()=>{
+ const h=await load();h.run("openDetail('s1');openFinance();addFinanceAddwork(financeSectionsForSite(site('s1'))[0])");
+ const label=h.el('financeSections').querySelector('[data-fin-label]');label.value='Pekerjaan tambahan';label.dispatchEvent({type:'change'});
+ const fields=h.el('financeSections').querySelectorAll('[data-fin-price]');assert.ok(fields.length>=2);
+ for(const field of fields){input(field,'');for(const digit of '1234567890123')input(field,field.value+digit);assert.equal(field.value,'1.234.567.890.123');}
+ h.fire('saveFinance');const saved=JSON.parse(h.context.localStorage.getItem(KEY)).sites[0].finance.rows;assert.ok(saved.some(r=>r.type==='addwork'));for(const row of saved)assert.equal(row.clientPrice,1234567890123);
+ const reloaded=await load({[KEY]:h.context.localStorage.getItem(KEY)});reloaded.run("openDetail('s1');openFinance()");for(const field of reloaded.el('financeSections').querySelectorAll('[data-fin-price]'))assert.equal(field.value,'1.234.567.890.123');
+});
+test('payment input accepts large typed and pasted amounts and updates totals then saves',async()=>{
+ const h=await load();h.run("openDetail('s1');openFinance();openFinancePayment(financeDraft[0].id);addFinancePayment()");
+ const field=h.el('financePaymentRows').querySelector('[data-fin-pay-amount]');for(const digit of '250000000000')input(field,field.value+digit);assert.equal(field.value,'250.000.000.000');assert.equal(h.run('financePaymentRow().payments[0].amount'),250000000000);
+ input(field,'Rp 125.000.000');assert.equal(field.value,'125.000.000');assert.match(h.el('financePaymentTotal').textContent,/125\.000\.000/);
+ input(field,'');assert.equal(h.run('financePaymentRow().payments[0].amount'),0);
+ input(field,'250.000.000');h.run("closeModal('financePaymentModal')");h.fire('saveFinance');assert.equal(JSON.parse(h.context.localStorage.getItem(KEY)).sites[0].finance.rows[0].payments[0].amount,250000000);
+});
+test('shared live rupiah input preserves mid-string caret and decimal saved-data parsing',()=>{
+ const field={value:'12.3456',selectionStart:7,setSelectionRange(a,b){this.selectionStart=a;this.selectionEnd=b;}};assert.equal(C.moneyInput(field),123456);assert.equal(field.value,'123.456');assert.equal(field.selectionStart,7);
+ field.value='12.45.678';field.selectionStart=2;assert.equal(C.moneyInput(field),1245678);assert.equal(field.selectionStart,3);
+ field.value='Rp 250.000.000,50';field.selectionStart=null;assert.equal(C.moneyInput(field),250000001);
+ assert.equal(C.money(1250.5),1251);assert.equal(C.money('1250.5'),1251);
+});
+
+test('PERKUATAN screenshot case types 3333333333 and retains billions after save',async()=>{
+ const h=await load();state(h).sites[0].workType='PERKUATAN';h.run("openDetail('s1');openFinance()");
+ const field=h.el('financeSections').querySelector('[data-fin-price]');input(field,'');
+ for(const digit of '3333333333')input(field,field.value+digit);
+ assert.equal(field.value,'3.333.333.333');assert.match(h.el('financeBuild').textContent,/v6\.4/);
+ h.fire('saveFinance');const raw=h.context.localStorage.getItem(KEY);assert.equal(JSON.parse(raw).sites[0].finance.rows[0].clientPrice,3333333333);
+ const reloaded=await load({[KEY]:raw});reloaded.run("openDetail('s1');openFinance()");assert.equal(reloaded.el('financeSections').querySelector('[data-fin-price]').value,'3.333.333.333');
+});
+
+test('service worker never substitutes old cached JS for a new version and precaches exact asset URLs',async()=>{
+ const vm=require('node:vm'),listeners={},cached=new Map(),network=[];let installed=[];
+ const scope='https://example.test/trackers/';cached.set(scope+'assets/js/app.js','OLD');
+ const cache={addAll:async requests=>{installed=requests;},match:async(req,opts)=>{assert.ok(!opts?.ignoreSearch);return cached.get(req.url||new URL(req,scope).href);},put:async(req,res)=>cached.set(req.url,res)};
+ const context={URL,Request,Response,self:{registration:{scope},location:{origin:'https://example.test'},addEventListener:(name,fn)=>listeners[name]=fn},caches:{open:async()=>cache},fetch:async(req,opts)=>{network.push([req.url,opts]);return new Response('NEW');}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../sw.js'),'utf8'),context);
+ let promise;listeners.install({waitUntil:p=>promise=p});await promise;
+ assert.ok(installed.some(r=>r.url===scope+'assets/js/app.js?v=20260922.64'&&r.cache==='reload'));
+ const req=new Request(scope+'assets/js/app.js?v=20260922.64');listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
+ listeners.fetch({request:req,respondWith:p=>promise=p});assert.equal(await (await promise).text(),'NEW');assert.equal(network.length,1);
+ let version;listeners.message({data:{type:'GET_VERSION'},ports:[{postMessage:v=>version=v}]});assert.equal(version,'6.4');
+});

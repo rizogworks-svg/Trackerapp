@@ -28,6 +28,20 @@
     const n = s.includes(',') ? Number(s.replace(/\./g,'').replace(',','.')) : /^\d{1,3}(\.\d{3})+$/.test(s) ? Number(s.replace(/\./g,'')) : Number(s);
     return Number.isFinite(n) ? Math.max(0,Math.round(n)) : 0;
   }
+  // Live rupiah fields always use dots as thousands separators, even while a group is incomplete.
+  // Keep this separate from money(), which also reads numeric/decimal saved data.
+  function moneyInput(field) {
+    const raw=String(field.value||''),caret=field.selectionStart;
+    const before=caret==null?null:(raw.slice(0,caret).match(/\d/g)||[]).length;
+    const amount=money(raw.replace(/\./g,''));
+    field.value=amount?amount.toLocaleString('id-ID'):'';
+    if(before!==null&&typeof field.setSelectionRange==='function'){
+      let position=0,seen=0;
+      while(position<field.value.length&&seen<before){if(/\d/.test(field.value[position]))seen++;position++;}
+      field.setSelectionRange(position,position);
+    }
+    return amount;
+  }
   function csvParse(raw) {
     const src = String(raw).replace(/^\uFEFF/,''), first = src.split(/\r?\n/)[0];
     const sep = (first.match(/;/g)||[]).length > (first.match(/,/g)||[]).length ? ';' : ',';
@@ -116,5 +130,5 @@
       throw error;
     }
   }
-  return {date,money,csvParse,csvWrite,bastProgress,toggleBast,belongs,total,validateSnapshot,writeBatch,stages};
+  return {date,money,moneyInput,csvParse,csvWrite,bastProgress,toggleBast,belongs,total,validateSnapshot,writeBatch,stages};
 });

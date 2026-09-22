@@ -1267,8 +1267,7 @@ function renderFinance(){
 
   document.querySelectorAll("[data-fin-price]").forEach(inp=>inp.oninput=()=>{
     const row=financeDraft.find(x=>x.id===inp.dataset.finPrice);if(!row)return;
-    row.clientPrice=financeNum(inp.value);
-    inp.value=moneyInputValue(row.clientPrice);
+    row.clientPrice=TrackersCore.moneyInput(inp);
     updateFinanceTotals()
   });
 
@@ -1279,6 +1278,7 @@ function renderFinance(){
   updateFinanceTotals()
 }
 function openFinance(){
+  if($("financeBuild"))$("financeBuild").textContent="Input nominal v6.4 • sampai miliaran dan triliunan";
   const s=normalizeSiteModules(site(currentSite));if(!s)return;
   prepareFinanceDraft(s);
   renderFinance();
@@ -1334,8 +1334,7 @@ function renderFinancePayment(){
   });
   document.querySelectorAll("[data-fin-pay-amount]").forEach(inp=>inp.oninput=()=>{
     const p=row.payments.find(x=>x.id===inp.dataset.finPayAmount);if(!p)return;
-    p.amount=financeNum(inp.value);
-    inp.value=moneyInputValue(p.amount);
+    p.amount=TrackersCore.moneyInput(inp);
     $("financePaymentTotal").textContent=rupiah(financePaymentTotal(row));
     updateFinanceTotals()
   });

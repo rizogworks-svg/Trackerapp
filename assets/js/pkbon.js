@@ -125,18 +125,7 @@ function renderRows(){
   });
   $$('#itemRows input').forEach(e=>e.oninput=ev=>{
     const i=+ev.target.dataset.i,k=ev.target.dataset.k;
-    if(k==='harga'){
-      const field=ev.target,raw=field.value,caret=field.selectionStart;
-      const digitsBefore=caret==null?null:(raw.slice(0,caret).match(/\d/g)||[]).length;
-      // Dots in this rupiah input are grouping marks, including incomplete groups while typing.
-      const amount=parseRupiah(raw.replace(/\./g,''));
-      state.items[i][k]=amount;field.value=formatRupiahInput(amount);
-      if(digitsBefore!==null&&typeof field.setSelectionRange==='function'){
-        let position=0,seen=0;
-        while(position<field.value.length&&seen<digitsBefore){if(/\d/.test(field.value[position]))seen++;position++;}
-        field.setSelectionRange(position,position);
-      }
-    }
+    if(k==='harga')state.items[i][k]=TrackersCore.moneyInput(ev.target);
     else state.items[i][k]=k==='vol'?Math.max(0,Number(ev.target.value)||0):ev.target.value;
     if(['vol','harga'].includes(k)){const tr=ev.target.closest('tr');tr.querySelector('.row-total').textContent=fmt((Number(state.items[i].vol)||0)*(Number(state.items[i].harga)||0))}
     syncPreview();
