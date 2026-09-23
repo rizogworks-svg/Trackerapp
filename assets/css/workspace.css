@@ -60,3 +60,17 @@ input,select,textarea{width:100%;min-width:0;border:1px solid var(--line);backgr
 :root[data-palette="neon"] .global-search-bar{color:var(--text)}
 :root[data-palette="neon"] .workspace .quick-notes-btn:hover,:root[data-palette="neon"] .workspace .notify-btn:hover{color:var(--text)}
 :root[data-palette="neon"] .workspace .section-label{color:var(--workspace-text)}
+
+/* ChatGPT-inspired neutral dark surfaces; preserve the existing layout. */
+:root[data-palette="chatgpt"]{--success:#a5d6b0}
+:root[data-palette="chatgpt"] .global-search-bar{background:var(--card);color:var(--text)}
+:root[data-palette="chatgpt"] .global-search-bar input::placeholder{color:var(--muted)}
+:root[data-palette="chatgpt"] .btn:is(.dark,.accent,.active),
+:root[data-palette="chatgpt"] .pkbon-integrated-root button.accent,
+:root[data-palette="chatgpt"] .cloud-avatar,
+:root[data-palette="chatgpt"] .notes-mode-btn.active,
+:root[data-palette="chatgpt"] .share-mode.active{color:#171717}
+:root[data-palette="chatgpt"] .btn:is(.dark,.accent,.active):hover,
+:root[data-palette="chatgpt"] .pkbon-integrated-root button.accent:hover{background:#d9d9d9;color:#171717}
+:root[data-palette="chatgpt"] .finance-positive{color:#a5d6b0}
+:root[data-palette="chatgpt"] .theme-choice.active{color:var(--text)}

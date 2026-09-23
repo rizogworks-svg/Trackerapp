@@ -187,7 +187,8 @@ const THEMES={
   stone:{"name":"Stone Gray","tone1":"#595959","tone2":"#9e9999","bg":"#595959","sidebar":"#595959","workspace":"#ececed","panel":"#c7c7c7","card":"#9e9999","hover":"#c7c7c7","line":"#303030","text":"#1f1f1f","muted":"#303030","accent":"#9e9999","danger":"#a22f2f","mode":"light","sidebarText":"#ffffff","workspaceText":"#1f1f1f"},
   sage:{"name":"Forest Sage","tone1":"#0d2d1e","tone2":"#779b7f","bg":"#0d2d1e","sidebar":"#0d2d1e","workspace":"#e0e6ec","panel":"#b7c9b9","card":"#f3f4fd","hover":"#b7c9b9","line":"#354d3d","text":"#142a1b","muted":"#354d3d","accent":"#779b7f","danger":"#a22f2f","mode":"light","sidebarText":"#ffffff","workspaceText":"#142a1b"},
   bluegray:{"name":"Cloud Blue","tone1":"#ffffff","tone2":"#669dfe","bg":"#ffffff","sidebar":"#ffffff","workspace":"#e0e6ec","panel":"#bbc5d2","card":"#ffffff","hover":"#bbc5d2","line":"#3b4c62","text":"#15263e","muted":"#3b4c62","accent":"#669dfe","danger":"#a22f2f","mode":"light","sidebarText":"#202020","workspaceText":"#15263e"},
-  neon:{"name":"Mono Lime","tone1":"#000000","tone2":"#ccff02","bg":"#000000","sidebar":"#000000","workspace":"#5c5c5c","panel":"#dcdcdc","card":"#ffffff","hover":"#dcdcdc","line":"#505050","text":"#202020","muted":"#505050","accent":"#ccff02","danger":"#a22f2f","mode":"light","sidebarText":"#ffffff","workspaceText":"#ffffff"}
+  neon:{"name":"Mono Lime","tone1":"#000000","tone2":"#ccff02","bg":"#000000","sidebar":"#000000","workspace":"#5c5c5c","panel":"#dcdcdc","card":"#ffffff","hover":"#dcdcdc","line":"#505050","text":"#202020","muted":"#505050","accent":"#ccff02","danger":"#a22f2f","mode":"light","sidebarText":"#ffffff","workspaceText":"#ffffff"},
+  chatgpt:{"name":"ChatGPT Dark","tone1":"#212121","tone2":"#ffffff","bg":"#171717","sidebar":"#171717","workspace":"#212121","panel":"#262626","card":"#303030","hover":"#3a3a3a","line":"#555555","text":"#ececec","muted":"#b4b4b4","accent":"#ffffff","danger":"#ff8585","mode":"dark"}
 };
 function applyTheme(){
   const t=THEMES[state.theme]||THEMES.light,r=document.documentElement.style;
@@ -245,7 +246,7 @@ function load(){
       rules:Array.isArray(r.rules)?r.rules:[],
       auditTrail:Array.isArray(r.auditTrail)?r.auditTrail:[],
       activities:Array.isArray(r.activities)?r.activities:[],
-      theme:(["light","midnight","sand","stone","sage","bluegray","neon"].includes(r.theme)?r.theme:(["ocean","lavender","navy","graphite"].includes(r.theme)?"sand":"light")),
+      theme:(["light","midnight","sand","stone","sage","bluegray","neon","chatgpt"].includes(r.theme)?r.theme:(["ocean","lavender","navy","graphite"].includes(r.theme)?"sand":"light")),
       pinned:Array.isArray(r.pinned)?r.pinned:[],
       tenants:Array.isArray(r.tenants)?r.tenants:[],
       lastNotificationSeen:r.lastNotificationSeen||"",
@@ -1288,7 +1289,7 @@ function renderFinance(){
   updateFinanceTotals()
 }
 function openFinance(){
-  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.5 • sampai miliaran dan triliunan";
+  if($("financeBuild"))$("financeBuild").textContent="Input nominal v7.6 • sampai miliaran dan triliunan";
   const s=normalizeSiteModules(site(currentSite));if(!s)return;
   $("financeDueDate").value=s.finance.dueDate||"";
   prepareFinanceDraft(s);
