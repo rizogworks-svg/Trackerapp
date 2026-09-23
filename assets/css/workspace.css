@@ -49,3 +49,14 @@ input,select,textarea{width:100%;min-width:0;border:1px solid var(--line);backgr
 
 /* Reminder panel is opened explicitly from the topbar. */
 #remindersModal .action-panel{margin:0;padding:0;border:0;background:transparent}#remindersModal .action-list{max-height:55vh}#quickRemindersTop svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* Reference palettes: colors only. */
+.shell-sidebar{color:var(--sidebar-text,var(--text))}
+.shell-sidebar button:hover{color:var(--text)}
+.workspace{color:var(--workspace-text,var(--text))}
+.workspace .panel,.workspace .surface{color:var(--text)}
+:root:is([data-palette="stone"],[data-palette="sage"],[data-palette="neon"]) .shell-sidebar .brand img{filter:brightness(0) invert(1)}
+:root[data-palette="neon"] .modalbg>.modal,:root[data-palette="neon"] .modal-card,:root[data-palette="neon"] .cloud-auth-card{background:var(--panel);color:var(--text)}
+:root[data-palette="neon"] .global-search-bar{color:var(--text)}
+:root[data-palette="neon"] .workspace .quick-notes-btn:hover,:root[data-palette="neon"] .workspace .notify-btn:hover{color:var(--text)}
+:root[data-palette="neon"] .workspace .section-label{color:var(--workspace-text)}
