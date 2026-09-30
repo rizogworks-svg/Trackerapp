@@ -25,7 +25,9 @@ function clone(x){return JSON.parse(JSON.stringify(x))}
 function loadJSON(k,f){try{const raw=localStorage.getItem(k);if(raw===null)return clone(f);const v=JSON.parse(raw);TrackersCore.validateSnapshot({trackly:{sites:[]},pkbon:{[k]:v}});return v;}catch{window.TRACKERS_CORRUPT_KEYS=[...(window.TRACKERS_CORRUPT_KEYS||[]),k];return clone(f)}}
 function notifyTracklyHistory(type='PKBON_CHANGED'){
   try{
-    window.dispatchEvent(new CustomEvent('trackly:pkbon-event',{detail:{type,history:Array.isArray(history)?clone(history):[]}}));
+    // Same-window event: reuse the existing array reference instead of cloning
+    // the entire history (which may contain large legacy attachment strings).
+    window.dispatchEvent(new CustomEvent('trackly:pkbon-event',{detail:{type,history:Array.isArray(history)?history:[]}}));
   }catch(_){}
 }
 function saveJSON(k,v,silent=false){
@@ -221,8 +223,9 @@ function loadDoc(d){
 function duplicateDoc(d){
   if(!d)return;const x=clone(d);x.id=null;x.nomorForm='';x.documentSettings=null;x.documentOfficers=null;x.status='Draft';x.tanggal=today();x.pkbonNo='';x.lampiranPengajuan='';x.lampiranTransfer='';x.lampiranBuktiBayar='';loadDoc(x);state.currentId=null;state.lampiranPengajuan='';state.lampiranTransfer='';state.lampiranBuktiBayar='';state.pkbonAuto=false;if(settings.autoNumber)generatePkbonNo(false);syncPreview();toast('Duplikat dibuat sebagai PKBON baru')
 }
+function historySearchText(d){return [d?.pkbonNo,d?.tanggal,d?.status,d?.site,d?.projectId,d?.pekerjaan,d?.keteranganUmum,d?.bank?.nama,d?.bank?.rekening,d?.bank?.bank].filter(Boolean).join(' ').toLocaleLowerCase('id-ID')}
 function renderHistory(){
-  const q=($('#historySearch').value||'').toLowerCase(),status=$('#historyStatusFilter').value;const arr=history.filter(d=>(!status||d.status===status)&&JSON.stringify(d).toLowerCase().includes(q));
+  const q=($('#historySearch').value||'').trim().toLocaleLowerCase('id-ID'),status=$('#historyStatusFilter').value;const arr=history.filter(d=>(!status||d.status===status)&&(!q||historySearchText(d).includes(q)));
   $('#historyList').innerHTML=arr.length?arr.map(d=>`<div class="history-item"><div class="history-main"><span class="status-badge ${String(d.status).toLowerCase()}">${esc(d.status||'Draft')}</span><div><b>${esc(d.pkbonNo||'(tanpa nomor)')}</b><br><small>${esc(d.site||'')} • ${dateID(d.tanggal)} • ${fmt(d.total)}${d.pekerjaan?' • '+esc(d.pekerjaan):''}</small></div></div><div class="mini-actions"><select data-history-status="${d.id}">${STATUSES.map(x=>`<option${x===d.status?' selected':''}>${x}</option>`).join('')}</select><button data-open="${d.id}">Buka</button><button data-dup="${d.id}">Duplikat</button><button data-delhist="${d.id}">Hapus</button></div></div>`).join(''):'<p class="empty-state">Tidak ada PKBON sesuai filter.</p>';
   $$('[data-history-status]').forEach(s=>s.onchange=()=>{const d=history.find(x=>x.id==s.dataset.historyStatus);if(!d)return;if(s.value!=='Draft'){const errors=documentErrors(d);if(errors.length){s.value=d.status;alert('Buka dan lengkapi PKBON terlebih dahulu:\n'+errors.join('\n'));return;}}const next=history.map(x=>x===d?{...d,status:s.value}:x);saveJSON('pkbon_history',next);history=next;if(state.currentId===d.id)$('#status').value=s.value;renderHistory();renderRekap();renderDashboard();toast('Status diperbarui')});
   $$('[data-open]').forEach(b=>b.onclick=()=>loadDoc(history.find(x=>x.id==b.dataset.open)));$$('[data-dup]').forEach(b=>b.onclick=()=>duplicateDoc(history.find(x=>x.id==b.dataset.dup)));$$('[data-delhist]').forEach(b=>b.onclick=()=>{if(confirm('Hapus riwayat ini?')){history=history.filter(x=>x.id!=b.dataset.delhist);saveJSON('pkbon_history',history);renderHistory();renderRekapFilters();renderRekap();renderDashboard()}})
@@ -295,7 +298,7 @@ function renderRekapFilters(){
   const allSites=[...new Set([...sites.map(x=>x.name),...history.map(x=>x.site).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'id'));s.innerHTML='<option value="">Semua Site</option>'+allSites.map(v=>`<option value="${attr(v)}">${esc(v)}</option>`).join('');if([...s.options].some(o=>o.value===oldS))s.value=oldS;
 }
 function filteredRekap(){
-  const mo=$('#rekapMonth').value,yr=$('#rekapYear').value,site=$('#rekapSite').value,status=$('#rekapStatus').value,q=($('#rekapSearch').value||'').toLowerCase();return history.filter(d=>{const p=String(d.tanggal||'').split('-'),okM=!mo||Number(p[1])===Number(mo),okY=!yr||Number(p[0])===Number(yr),okS=!site||d.site===site,okStatus=!status||d.status===status,okQ=!q||JSON.stringify(d).toLowerCase().includes(q);return okM&&okY&&okS&&okStatus&&okQ}).sort((a,b)=>String(a.tanggal).localeCompare(String(b.tanggal))||String(a.pkbonNo).localeCompare(String(b.pkbonNo)));
+  const mo=$('#rekapMonth').value,yr=$('#rekapYear').value,site=$('#rekapSite').value,status=$('#rekapStatus').value,q=($('#rekapSearch').value||'').trim().toLocaleLowerCase('id-ID');return history.filter(d=>{const p=String(d.tanggal||'').split('-'),okM=!mo||Number(p[1])===Number(mo),okY=!yr||Number(p[0])===Number(yr),okS=!site||d.site===site,okStatus=!status||d.status===status,okQ=!q||historySearchText(d).includes(q);return okM&&okY&&okS&&okStatus&&okQ}).sort((a,b)=>String(a.tanggal).localeCompare(String(b.tanggal))||String(a.pkbonNo).localeCompare(String(b.pkbonNo)));
 }
 function renderRekap(){
   if(!$('#rekapRows'))return;const arr=filteredRekap(),sum=arr.reduce((a,b)=>a+Number(b.total||0),0);$('#rekapCount').textContent=arr.length.toLocaleString('id-ID');$('#rekapTotal').textContent=fmt(sum);$('#rekapAverage').textContent=fmt(arr.length?sum/arr.length:0);$('#rekapRows').innerHTML=arr.length?arr.map((d,i)=>`<tr><td>${i+1}</td><td>${esc(d.pkbonNo)}</td><td>${dateID(d.tanggal)}</td><td><span class="status-badge ${String(d.status).toLowerCase()}">${esc(d.status)}</span></td><td>${esc(d.site)}</td><td>${esc(d.projectId||'')}</td><td>${esc(d.pekerjaan||'')}</td><td>${esc((d.bank?.nama||'')+(d.bank?.bank?' / '+d.bank.bank:''))}</td><td class="money">${fmt(d.total)}</td></tr>`).join(''):'<tr><td colspan="9" class="empty-cell">Tidak ada data sesuai filter.</td></tr>'
@@ -315,8 +318,26 @@ function renderDashboard(){
   const recent=[...history].sort((a,b)=>String(b.savedAt||b.tanggal).localeCompare(String(a.savedAt||a.tanggal))).slice(0,5);$('#dashRecent').innerHTML=recent.length?recent.map(d=>`<div class="recent-row"><div><b>${esc(d.pkbonNo||'(tanpa nomor)')}</b><small>${esc(d.site||'Tanpa site')} • ${dateID(d.tanggal)}</small></div><span class="status-badge ${String(d.status).toLowerCase()}">${esc(d.status)}</span></div>`).join(''):'<p class="empty-state">Belum ada PKBON tersimpan.</p>';
 }
 
-function imageToDataURL(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.86){return new Promise((resolve,reject)=>{const fr=new FileReader();fr.onerror=reject;fr.onload=()=>{const img=new Image();img.onerror=reject;img.onload=()=>{let w=img.width,h=img.height,scale=Math.min(1,maxW/w,maxH/h);w=Math.max(1,Math.round(w*scale));h=Math.max(1,Math.round(h*scale));const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');ctx.drawImage(img,0,0,w,h);resolve(c.toDataURL(type,quality))};img.src=fr.result};fr.readAsDataURL(file)})}
-async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{state[key]=await imageToDataURL(f,1800,1800,'image/jpeg',.84);syncPreview();toast('Lampiran dimuat')}catch{toast('Gagal membaca gambar')}}
+function imageToDataURL(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.86,maxChars=0){return new Promise((resolve,reject)=>{
+  const src=URL.createObjectURL(file),img=new Image();
+  const cleanup=()=>{try{URL.revokeObjectURL(src)}catch{}try{img.removeAttribute('src')}catch{}};
+  img.onerror=()=>{cleanup();reject(new Error('Gagal membaca gambar'))};
+  img.onload=()=>{try{
+    let sourceW=img.naturalWidth||img.width,sourceH=img.naturalHeight||img.height,scale=Math.min(1,maxW/sourceW,maxH/sourceH);
+    let w=Math.max(1,Math.round(sourceW*scale)),h=Math.max(1,Math.round(sourceH*scale)),q=quality,out='';
+    for(let attempt=0;attempt<7;attempt++){
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      const ctx=c.getContext('2d',{alpha:type!=='image/jpeg'});ctx.drawImage(img,0,0,w,h);
+      out=c.toDataURL(type,q);c.width=1;c.height=1;
+      if(!maxChars||out.length<=maxChars)break;
+      if(q>0.52){q=Math.max(0.52,q-0.08);continue;}
+      w=Math.max(1,Math.round(w*0.82));h=Math.max(1,Math.round(h*0.82));q=quality;
+    }
+    cleanup();resolve(out);
+  }catch(err){cleanup();reject(err)}};
+  img.src=src;
+})}
+async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{state[key]=await imageToDataURL(f,1600,1600,'image/jpeg',.76,600000);syncPreview();toast('Lampiran dimuat')}catch{toast('Gagal membaca gambar')}}
 
 function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function backupData(){const data={app:'PKBON',version:'5.0',exportedAt:new Date().toISOString(),settings,sites,banks,templates,officers,history};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});downloadBlob(blob,'PKBON_Backup_'+today()+'.json');toast('Backup berhasil dibuat')}
@@ -564,7 +585,7 @@ function handleTracklyCommand(d={}){
 }
 window.addEventListener('trackly:pkbon-command',e=>handleTracklyCommand(e?.detail||{}));
 setTimeout(()=>{
-  try{window.dispatchEvent(new CustomEvent('trackly:pkbon-event',{detail:{type:'PKBON_READY',history:Array.isArray(history)?clone(history):[]}}))}catch(_){}
+  try{window.dispatchEvent(new CustomEvent('trackly:pkbon-event',{detail:{type:'PKBON_READY',history:Array.isArray(history)?history:[]}}))}catch(_){}
 },0);
 
 

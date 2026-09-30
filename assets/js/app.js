@@ -245,7 +245,7 @@ function load(){
       sites:Array.isArray(r.sites)?r.sites:[],
       clients:Array.isArray(r.clients)?r.clients:[],
       rules:Array.isArray(r.rules)?r.rules:[],
-      auditTrail:Array.isArray(r.auditTrail)?r.auditTrail:[],
+      auditTrail:Array.isArray(r.auditTrail)?TrackersOps.compactAuditTrail(r.auditTrail):[],
       activities:Array.isArray(r.activities)?r.activities:[],
       theme:(["default","light","midnight","sand","stone","sage","bluegray","neon","chatgpt"].includes(r.theme)?r.theme:(["ocean","lavender","navy","graphite"].includes(r.theme)?"sand":"default")),
       pinned:Array.isArray(r.pinned)?r.pinned:[],

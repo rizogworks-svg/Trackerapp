@@ -16,6 +16,29 @@ test('audit captures deletes, old/new money and PKBON changes but ignores prefer
  const next=structuredClone(old);next.trackly.sites[0].finance.rows[0].clientPrice=3e9;next.trackly.notes=[];next.trackly.theme='midnight';next.pkbon.pkbon_history[0].total=3e9;
  const changes=Ops.diffEntities(old,next);assert.equal(changes.length,3);assert.equal(changes[0].fields[0].before.rows[0].clientPrice,3000);assert.equal(changes[0].fields[0].after.rows[0].clientPrice,3e9);assert.equal(changes[1].action,'Hapus');assert.equal(changes[2].entity,'pkbon_history');
 });
+test('PKBON audit does not retain Base64 attachments',()=>{
+ const image='data:image/jpeg;base64,'+'A'.repeat(800000);
+ const old={trackly:{sites:[],clients:[],tenants:[],activities:[],rules:[],notes:[],bastProcesses:[],pinned:[]},pkbon:{pkbon_history:[{id:'p',pkbonNo:'001',lampiranPengajuan:image,items:[],total:1}]} };
+ const next=structuredClone(old);next.pkbon.pkbon_history[0].total=2;next.pkbon.pkbon_history[0].lampiranPengajuan=image+'C';
+ const changes=Ops.diffEntities(old,next);
+ const doc=changes.find(c=>c.entity==='pkbon_history');
+ const attachment=doc.fields.find(f=>f.field==='lampiranPengajuan');
+ assert.equal(typeof attachment.before,'object');assert.equal(attachment.before.type,'attachment');assert.equal(typeof attachment.after,'object');
+ assert.ok(attachment.before.bytes>500000);
+ const legacy=Ops.compactAuditTrail([{changes}]);
+ assert.equal(legacy[0].changes[0].fields.find(f=>f.field==='lampiranPengajuan').before.type,'attachment');
+ assert.ok(JSON.stringify(legacy).length<10000);
+});
+
+test('PKBON diff avoids serializing the full history just to compare documents',()=>{
+ const image='data:image/jpeg;base64,'+'B'.repeat(1000000);
+ const oldDoc={id:'p',pkbonNo:'001',lampiranPengajuan:image,items:[{uraian:'A',vol:1,harga:1}],total:1};
+ const old={trackly:{sites:[],clients:[],tenants:[],activities:[],rules:[],notes:[],bastProcesses:[],pinned:[]},pkbon:{pkbon_history:[oldDoc]}};
+ const next={trackly:structuredClone(old.trackly),pkbon:{pkbon_history:[{...oldDoc,total:2}]}};
+ const changes=Ops.diffEntities(old,next);
+ assert.equal(changes.length,1);assert.deepEqual(changes[0].fields.map(f=>f.field),['total']);
+});
+
 test('task due date persists separately from execution date and clears correctly',async()=>{
  const h=await load();h.run("openDetail('s1')");h.fire('manageTasks');input(h.el('newTaskTitle'),'Survey');input(h.el('newTaskDate'),'2026-09-01');input(h.el('newTaskDueDate'),'2026-09-25');h.fire('addTask');h.fire('saveTasks');
  let saved=JSON.parse(h.context.localStorage.getItem(KEY));assert.equal(saved.sites[0].tasks[0].dueDate,'2026-09-25');assert.equal(saved.sites[0].tasks[0].date,'2026-09-01');assert.ok(saved.auditTrail[0].changes.some(c=>c.fields.some(f=>f.field==='tasks')));

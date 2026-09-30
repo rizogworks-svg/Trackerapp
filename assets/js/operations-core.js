@@ -1,6 +1,6 @@
 /* Pure reminder and audit calculations. Dates are local calendar dates. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TrackersOps=api;})(typeof window==='object'?window:this,function(){
- const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+ const equal=(a,b)=>{if(a===b)return true;if(a===null||b===null||typeof a!=='object'||typeof b!=='object')return a===b;return JSON.stringify(a)===JSON.stringify(b)};
  function days(from,to){return Math.round((Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z'))/86400000);}
  function due(date,today){if(!date)return null;const d=days(today,date);if(!Number.isFinite(d)||d>3)return null;return {priority:d<0?0:d===0?1:2,label:d<0?'Terlambat '+(-d)+' hari':d===0?'Jatuh tempo hari ini':'Jatuh tempo '+d+' hari lagi'};}
  function reminders(sites,documents,today,metrics,belongs){const out=[];
@@ -15,16 +15,47 @@
   for(const doc of documents.filter(d=>d&&['Diajukan','Disetujui'].includes(d.status))){const s=sites.find(s=>belongs(doc,s,sites));if(s?.archived)continue;out.push({id:'pkbon:'+doc.id,type:'pkbon',siteId:s?.id||'',siteName:s?.siteName||doc.site||'Tanpa site',docId:doc.id,title:doc.pkbonNo||'PKBON',amount:Number(doc.total)||0,priority:3,label:doc.status==='Disetujui'?'Menunggu pembayaran':'Menunggu persetujuan'});}
   return out.sort((a,b)=>a.priority-b.priority||(a.date||'').localeCompare(b.date||'')||a.title.localeCompare(b.title));
  }
+ function auditValue(field,value){
+  if(typeof value==='string'){
+   const isAttachment=/^(lampiran|signature)/i.test(String(field||''))||/^data:image\//i.test(value);
+   if(!isAttachment)return value;
+   const comma=value.indexOf(','),payload=comma>=0?value.slice(comma+1):value;
+   const bytes=Math.max(0,Math.floor(payload.length*0.75));
+   const mime=comma>0&&/^data:/i.test(value)?value.slice(5,comma).split(';')[0]:'image/*';
+   return {type:'attachment',mime,bytes};
+  }
+  if(/officers/i.test(String(field||''))&&Array.isArray(value)){
+   return value.map(o=>o&&typeof o==='object'?{...o,signature:auditValue('signature',o.signature||'')}:o);
+  }
+  return value;
+ }
+ function compactAuditTrail(trail){
+  if(!Array.isArray(trail))return [];
+  return trail.map(entry=>{
+   if(!entry||typeof entry!=='object'||!Array.isArray(entry.changes))return entry;
+   return {...entry,changes:entry.changes.map(change=>{
+    if(!change||typeof change!=='object'||!Array.isArray(change.fields))return change;
+    return {...change,fields:change.fields.map(f=>f&&typeof f==='object'?{...f,before:auditValue(f.field,f.before),after:auditValue(f.field,f.after)}:f)};
+   })};
+  });
+ }
  function diffEntities(before,after){const changes=[];
   for(const key of ['sites','notes','bastProcesses','clients','rules']){const old=new Map((before?.trackly?.[key]||[]).map(x=>[String(x.id),x])),next=new Map((after?.trackly?.[key]||[]).map(x=>[String(x.id),x]));
    for(const id of new Set([...old.keys(),...next.keys()])){const a=old.get(id),b=next.get(id);if(equal(a,b))continue;const fields=[...new Set([...Object.keys(a||{}),...Object.keys(b||{})])].filter(k=>!equal(a?.[k],b?.[k])).map(field=>({field,before:a?.[field]??null,after:b?.[field]??null}));changes.push({entity:key,entityId:id,siteId:key==='sites'?id:b?.siteId||a?.siteId||'',name:b?.siteName||a?.siteName||b?.title||a?.title||b?.name||id,action:!a?'Tambah':!b?'Hapus':'Ubah',fields});}
   }
-  for(const key of ['pkbon_history','pkbon_settings','pkbon_sites','pkbon_banks','pkbon_templates','pkbon_officers']){const a=before?.pkbon?.[key],b=after?.pkbon?.[key];if(equal(a,b))continue;
-   if(key==='pkbon_history'){const old=new Map((a||[]).map(x=>[String(x.id),x])),next=new Map((b||[]).map(x=>[String(x.id),x]));for(const id of new Set([...old.keys(),...next.keys()])){const x=old.get(id),y=next.get(id);if(!equal(x,y))changes.push({entity:key,entityId:id,siteId:y?.workspaceSiteId||x?.workspaceSiteId||'',name:y?.pkbonNo||x?.pkbonNo||id,action:!x?'Tambah':!y?'Hapus':'Ubah',fields:[...new Set([...Object.keys(x||{}),...Object.keys(y||{})])].filter(k=>!equal(x?.[k],y?.[k])).map(field=>({field,before:x?.[field]??null,after:y?.[field]??null}))});}}
-   else changes.push({entity:key,entityId:key,name:key,action:'Ubah',fields:[{field:key,before:a??null,after:b??null}]});
+  for(const key of ['pkbon_history','pkbon_settings','pkbon_sites','pkbon_banks','pkbon_templates','pkbon_officers']){const a=before?.pkbon?.[key],b=after?.pkbon?.[key];if(key!=='pkbon_history'&&equal(a,b))continue;
+   if(key==='pkbon_history'){
+    const old=new Map((a||[]).map(x=>[String(x.id),x])),next=new Map((b||[]).map(x=>[String(x.id),x]));
+    for(const id of new Set([...old.keys(),...next.keys()])){
+     const x=old.get(id),y=next.get(id),fieldNames=[...new Set([...Object.keys(x||{}),...Object.keys(y||{})])],changed=fieldNames.filter(k=>!equal(x?.[k],y?.[k]));
+     if(!changed.length)continue;
+     changes.push({entity:key,entityId:id,siteId:y?.workspaceSiteId||x?.workspaceSiteId||'',name:y?.pkbonNo||x?.pkbonNo||id,action:!x?'Tambah':!y?'Hapus':'Ubah',fields:changed.map(field=>({field,before:auditValue(field,x?.[field]??null),after:auditValue(field,y?.[field]??null)}))});
+    }
+   }
+   else changes.push({entity:key,entityId:key,name:key,action:'Ubah',fields:[{field:key,before:key==='pkbon_officers'?auditValue(key,a??null):a??null,after:key==='pkbon_officers'?auditValue(key,b??null):b??null}]});
   }
   for(const key of ['tenants'])if(!equal(before?.trackly?.[key],after?.trackly?.[key]))changes.push({entity:key,entityId:key,name:key,action:'Ubah',fields:[{field:key,before:before?.trackly?.[key]??null,after:after?.trackly?.[key]??null}]});
   return changes;
  }
- return {days,due,reminders,diffEntities};
+ return {days,due,reminders,diffEntities,compactAuditTrail};
 });
