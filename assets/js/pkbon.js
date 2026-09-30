@@ -20,8 +20,27 @@ const DEFAULTS={
   templates:[],
   officers:[]
 };
-let state={items:[],lampiranPengajuan:'',lampiranTransfer:'',lampiranBuktiBayar:'',currentId:null,bankSnapshot:null,pkbonAuto:false};
+const MEDIA_KEYS={pengajuan:'lampiranPengajuan',transfer:'lampiranTransfer',buktiBayar:'lampiranBuktiBayar'};
+let state={items:[],lampiranPengajuan:'',lampiranTransfer:'',lampiranBuktiBayar:'',pendingAttachments:{},attachmentUrls:{},currentId:null,bankSnapshot:null,pkbonAuto:false};
 function clone(x){return JSON.parse(JSON.stringify(x))}
+function refId(ref){return typeof ref==='string'?ref:String(ref?.id||'')}
+function attachmentMeta(id,name='',mime='',size=0){return id?{id,name:String(name||''),mime:String(mime||''),size:Number(size)||0}:null}
+function emptyPendingAttachments(){return {pengajuan:null,transfer:null,buktiBayar:null}}
+function revokeAttachmentUrls(){for(const url of Object.values(state.attachmentUrls||{})){try{URL.revokeObjectURL(url)}catch{}}state.attachmentUrls={}}
+function legacyDataUrl(value){return typeof value==='string'&&/^data:image\//i.test(value)}
+function attachmentRefForDoc(doc,key){const direct=doc?.attachments?.[key];if(direct)return attachmentMeta(refId(direct),direct?.name,direct?.mime,direct?.size);const field=MEDIA_KEYS[key],legacy=doc?.[field];return legacy&&!legacyDataUrl(legacy)?attachmentMeta(legacy):null}
+function cleanDocForLocalStorage(doc){
+  const out={...doc},attachments={...(doc.attachments||{})};
+  for(const key of Object.keys(MEDIA_KEYS)){
+    const ref=attachmentRefForDoc(doc,key);
+    if(ref)attachments[key]=ref;else delete attachments[key];
+    delete out[MEDIA_KEYS[key]];
+  }
+  if(Object.keys(attachments).length)out.attachments=attachments;else delete out.attachments;
+  if(Array.isArray(out.documentOfficers))out.documentOfficers=out.documentOfficers.map(o=>{const x={...o};if(x.signatureRef)x.signatureRef=attachmentMeta(refId(x.signatureRef),x.signatureName,x.signatureMime,x.signatureSize);delete x.signature;return x});
+  return out;
+}
+function buildStateAttachments(doc){return {pengajuan:refId(attachmentRefForDoc(doc,'pengajuan')),transfer:refId(attachmentRefForDoc(doc,'transfer')),buktiBayar:refId(attachmentRefForDoc(doc,'buktiBayar'))}}
 function loadJSON(k,f){try{const raw=localStorage.getItem(k);if(raw===null)return clone(f);const v=JSON.parse(raw);TrackersCore.validateSnapshot({trackly:{sites:[]},pkbon:{[k]:v}});return v;}catch{window.TRACKERS_CORRUPT_KEYS=[...(window.TRACKERS_CORRUPT_KEYS||[]),k];return clone(f)}}
 function notifyTracklyHistory(type='PKBON_CHANGED'){
   try{
@@ -41,6 +60,51 @@ function saveJSON(k,v,silent=false){
   catch(e){alert('Data belum tersimpan. Penyimpanan penuh. Download Backup dari Pengaturan PKBON.');throw e;}
   if(!silent)setTimeout(()=>notifyTracklyHistory('PKBON_CHANGED'),0);
   return true;
+}
+let mediaReadyPromise=window.PKBONMediaStore?window.PKBONMediaStore.open():Promise.resolve(null);
+async function putMediaBlob(blob,{ownerId='',role='',name='',mime=''}={}){
+  if(!blob)throw new Error('Lampiran kosong.'); if(!window.PKBONMediaStore)throw new Error('IndexedDB tidak tersedia di browser ini.'); await mediaReadyPromise;
+  const id=uid('pkatt'),record={id,ownerId:String(ownerId||''),role:String(role||''),name:String(name||''),mime:String(mime||blob.type||'application/octet-stream'),size:Number(blob.size)||0,createdAt:new Date().toISOString(),blob};
+  await window.PKBONMediaStore.put(record); return attachmentMeta(id,record.name,record.mime,record.size);
+}
+async function getMediaUrl(id){if(!id||!window.PKBONMediaStore)return '';await mediaReadyPromise;const rec=await window.PKBONMediaStore.get(id);return rec?.blob?URL.createObjectURL(rec.blob):''}
+async function migrateLegacyMedia(){
+  if(!window.PKBONMediaStore)return {historyChanged:false,officersChanged:false}; await mediaReadyPromise; let historyChanged=false,officersChanged=false; const migratedHistory=[];
+  for(const o of Array.isArray(officers)?officers:[]){
+    if(legacyDataUrl(o.signature)){
+      const blob=window.PKBONMediaStore.dataUrlToBlob(o.signature); const ref=await putMediaBlob(blob,{ownerId:o.id,role:'signature',name:'signature',mime:blob.type});
+      delete o.signature;o.signatureRef=ref;officersChanged=true;
+    }
+  }
+  for(const doc of Array.isArray(history)?history:[]){
+    let next=cleanDocForLocalStorage(doc),changed=Object.keys(MEDIA_KEYS).some(k=>Object.prototype.hasOwnProperty.call(doc,MEDIA_KEYS[k]));
+    for(const key of Object.keys(MEDIA_KEYS)){
+      const field=MEDIA_KEYS[key],legacy=doc?.[field];
+      if(legacyDataUrl(legacy)){
+        const blob=window.PKBONMediaStore.dataUrlToBlob(legacy); const ref=await putMediaBlob(blob,{ownerId:doc.id,role:key,name:field,mime:blob.type}); next.attachments={...(next.attachments||{}),[key]:ref}; changed=true;
+      }
+    }
+    if(Array.isArray(doc.documentOfficers)){
+      const mapped=[];
+      for(const o of doc.documentOfficers){
+        const x={...o};
+        if(legacyDataUrl(o?.signature)){
+          const blob=window.PKBONMediaStore.dataUrlToBlob(o.signature); const ref=await putMediaBlob(blob,{ownerId:doc.id,role:'signature',name:'signature',mime:blob.type});
+          x.signatureRef=ref;delete x.signature;changed=true;
+        }else if(x.signatureRef){x.signatureRef=attachmentMeta(refId(x.signatureRef),x.signatureName,x.signatureMime,x.signatureSize);delete x.signature}else delete x.signature;
+        mapped.push(x);
+      }
+      next.documentOfficers=mapped;
+    }
+    migratedHistory.push(next);historyChanged=historyChanged||changed;
+  }
+  if(historyChanged){history=migratedHistory;localStorage.setItem('pkbon_history',JSON.stringify(history))}
+  if(officersChanged)localStorage.setItem('pkbon_officers',JSON.stringify(officers));
+  return {historyChanged,officersChanged};
+}
+async function pruneUnreferencedMedia(){
+  if(!window.PKBONMediaStore)return;await mediaReadyPromise;const used=backupReferencedMediaIds();
+  for(const rec of await window.PKBONMediaStore.all())if(!used.has(rec.id))try{await window.PKBONMediaStore.remove(rec.id)}catch{}
 }
 function normalizeSites(raw){
   const result=[];
@@ -68,6 +132,7 @@ let templates=loadJSON('pkbon_templates',DEFAULTS.templates);
 if(!Array.isArray(templates))templates=clone(DEFAULTS.templates);
 templates=templates.map(t=>t.id==='tpl_bpujl'&&(!t.sat||t.sat==='Pcs')?{...t,sat:'Ls'}:t);
 history=Array.isArray(history)?history.map(d=>({...d,status:STATUSES.includes(d.status)?d.status:'Draft'})):[];
+let mediaMigrationPromise=Promise.resolve();
 
 function migrateOfficers(){
   if(!Array.isArray(officers))officers=[];
@@ -79,6 +144,7 @@ if(!settings.approvalIds.a2&&officers[1])settings.approvalIds.a2=officers[1].id;
 if(!settings.approvalIds.a3&&officers[2])settings.approvalIds.a3=officers[2].id;
 if(!settings.approvalIds.a4&&officers[3])settings.approvalIds.a4=officers[3].id;
 settings.pkbonSuffix='3';
+mediaMigrationPromise=mediaReadyPromise.then(()=>migrateLegacyMedia()).then(()=>pruneUnreferencedMedia()).then(()=>notifyTracklyHistory('PKBON_HISTORY')).catch(err=>{console.error('PKBON media initialization failed',err);toast('Penyimpanan lampiran tidak tersedia: '+err.message)});
 // Normalization on startup does not mark cloud data as locally edited.
 
 function toast(t){const e=$('#pkbonToast');e.textContent=t;e.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>e.classList.remove('show'),2200)}
@@ -173,70 +239,61 @@ function applySavedSite(){
 }
 
 function setSig(img,src){if(src){img.src=src;img.classList.remove('empty')}else{img.removeAttribute('src');img.classList.add('empty')}}
-function renderAttachmentPreviews(){
-  const map=[['previewPengajuan','lampiranPengajuan'],['previewTransfer','lampiranTransfer'],['previewBuktiBayar','lampiranBuktiBayar']];
-  map.forEach(([id,key])=>{const box=$('#'+id),src=state[key];box.innerHTML=src?`<img src="${attr(src)}" alt="Preview lampiran">`:'<span>Belum ada gambar</span>';const button=$(`[data-remove-attachment="${key}"]`);if(button)button.disabled=!src});
-}
-function syncPreview(){
-  const printSettings=state.documentSettings||settings;
-  const b=selectedBank()||{nama:'',rekening:'',bank:''};
+async function resolveAttachmentUrl(key){const pending=state.pendingAttachments?.[key];if(pending?.blob)return URL.createObjectURL(pending.blob);return state[key]?await getMediaUrl(state[key]):''}
+async function syncPreview(){
+  const printSettings=state.documentSettings||settings,b=selectedBank()||{nama:'',rekening:'',bank:''};
   $('#pvNomorForm').textContent=state.documentFormNumber||currentFormNumber();$('#pvPkbonNo').textContent=$('#pkbonNo').value;$('#pvTanggal').textContent=dateID($('#tanggal').value);$('#pvId').textContent=printSettings.id;$('#pvNama').textContent=printSettings.nama;$('#pvProjectId').textContent=$('#projectId').value||'';$('#pvPekerjaan').textContent=$('#pekerjaan').value||'';$('#pvSite').textContent=currentSite();
-  const rows=[...state.items];while(rows.length<16)rows.push(null);
-  $('#pvRows').innerHTML=rows.map((it,i)=>it?`<tr><td class="center">${i+1}</td><td>${esc(it.uraian)}</td><td class="center">${esc(it.sat)}</td><td class="center">${Number(it.vol)||0}</td><td class="money">${fmt(it.harga)}</td><td class="money">${fmt((Number(it.vol)||0)*(Number(it.harga)||0))}</td><td>${esc(it.keterangan)}</td></tr>`:'<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
+  const rows=[...state.items];while(rows.length<16)rows.push(null);$('#pvRows').innerHTML=rows.map((it,i)=>it?`<tr><td class="center">${i+1}</td><td>${esc(it.uraian)}</td><td class="center">${esc(it.sat)}</td><td class="center">${Number(it.vol)||0}</td><td class="money">${fmt(it.harga)}</td><td class="money">${fmt((Number(it.vol)||0)*(Number(it.harga)||0))}</td><td>${esc(it.keterangan)}</td></tr>`:'<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
   const gt=total();$('#pvGrandTotal').textContent=fmt(gt);$('#grandTotalLabel').textContent='Grand Total: '+fmt(gt);$('#pvTerbilang').textContent=terbilang(gt);$('#pvBankNama').textContent=b.nama||'';$('#pvBankRek').textContent=b.rekening||'';$('#pvBank').textContent=b.bank||'';const tglValue=$('#tanggal').value;const hari=dayNameID(tglValue);$('#pvKotaTanggal').textContent=`${hari?hari+', ':''}${longDateID(tglValue)}`;
-  [1,2,3,4].forEach(n=>{const o=state.documentOfficers?.[n-1]||officerById(settings.approvalIds['a'+n]);$('#pvAppr'+n+'Name').textContent=o?.name||'';$('#pvAppr'+n+'Role').textContent=o?.role||'';setSig($('#pvSig'+n),o?.signature||'')});
-  const p2=$('#page2'),p3=$('#page3');setSig($('#pvLampiranPengajuan'),state.lampiranPengajuan||'');setSig($('#pvLampiranTransfer'),state.lampiranTransfer||'');setSig($('#pvLampiranBuktiBayar'),state.lampiranBuktiBayar||'');p2.classList.toggle('hidden-print',!state.lampiranPengajuan&&!state.lampiranTransfer);p3.classList.toggle('hidden-print',!state.lampiranBuktiBayar);renderAttachmentPreviews();
+  revokeAttachmentUrls();
+  const officersForPreview=state.documentOfficers||[1,2,3,4].map(n=>officerById(settings.approvalIds['a'+n]));
+  await Promise.all([1,2,3,4].map(async n=>{const o=officersForPreview?.[n-1]||null;$('#pvAppr'+n+'Name').textContent=o?.name||'';$('#pvAppr'+n+'Role').textContent=o?.role||'';const url=o?.signatureRef?await getMediaUrl(refId(o.signatureRef)):(o?.signature||'');if(url)state.attachmentUrls['signature'+n]=url;setSig($('#pvSig'+n),url)}));
+  const [pengajuan,transfer,buktiBayar]=await Promise.all(['pengajuan','transfer','buktiBayar'].map(resolveAttachmentUrl));
+  if(pengajuan)state.attachmentUrls.pengajuan=pengajuan;if(transfer)state.attachmentUrls.transfer=transfer;if(buktiBayar)state.attachmentUrls.buktiBayar=buktiBayar;
+  setSig($('#pvLampiranPengajuan'),pengajuan);setSig($('#pvLampiranTransfer'),transfer);setSig($('#pvLampiranBuktiBayar'),buktiBayar);
+  const p2=$('#page2'),p3=$('#page3');p2.classList.toggle('hidden-print',!pengajuan&&!transfer);p3.classList.toggle('hidden-print',!buktiBayar);
+  const map=[['previewPengajuan','pengajuan'],['previewTransfer','transfer'],['previewBuktiBayar','buktiBayar']];await Promise.all(map.map(async([id,key])=>{const box=$('#'+id),url=state.attachmentUrls[key]||'',button=$(`[data-remove-attachment="${MEDIA_KEYS[key]}"]`);if(url)box.innerHTML=`<img src="${attr(url)}" alt="Preview lampiran">`;else box.innerHTML='<span>Belum ada gambar</span>';if(button)button.disabled=!url}));
 }
 
-function collect(){rememberSite(false);const b=selectedBank()||{};const match=sites.filter(x=>x.name.toLowerCase()===currentSite().toLowerCase()&&x.projectId.toLowerCase()===currentProjectId().toLowerCase());return{workspaceSiteId:state.workspaceSiteId||(match.length===1?match[0].workspaceSiteId||'':''),id:state.currentId||uid('pkbon'),pkbonNo:$('#pkbonNo').value.trim(),tanggal:$('#tanggal').value,status:$('#status').value||'Draft',nomorForm:state.documentFormNumber||currentFormNumber(),documentSettings:clone(state.documentSettings||settings),documentOfficers:clone(state.documentOfficers||[1,2,3,4].map(n=>officerById(settings.approvalIds['a'+n]))),site:currentSite(),projectId:$('#projectId').value.trim(),pekerjaan:$('#pekerjaan').value.trim(),keteranganUmum:$('#keteranganUmum').value.trim(),bank:clone(b),items:clone(state.items),lampiranPengajuan:state.lampiranPengajuan,lampiranTransfer:state.lampiranTransfer,lampiranBuktiBayar:state.lampiranBuktiBayar,total:total(),savedAt:new Date().toISOString()}}
-function saveCurrent(){
-  if(!$('#pkbonNo').value.trim())generatePkbonNo(false);
-  const d=collect();if(!d.pkbonNo)return toast('Nomor PKBON wajib diisi');
-  if(!d.site||!d.projectId||!TrackersCore.date(d.tanggal))return toast('Site, Project ID, dan tanggal wajib diisi.');
-  if(d.status!=='Draft'){const errors=validateDocument();if(errors.length){alert(errors.join('\n'));return;}}
-
+function collect(){rememberSite(false);const b=selectedBank()||{},match=sites.filter(x=>x.name.toLowerCase()===currentSite().toLowerCase()&&x.projectId.toLowerCase()===currentProjectId().toLowerCase());const d={workspaceSiteId:state.workspaceSiteId||(match.length===1?match[0].workspaceSiteId||'':''),id:state.currentId||uid('pkbon'),pkbonNo:$('#pkbonNo').value.trim(),tanggal:$('#tanggal').value,status:$('#status').value||'Draft',nomorForm:state.documentFormNumber||currentFormNumber(),documentSettings:clone(state.documentSettings||settings),documentOfficers:clone(state.documentOfficers||[1,2,3,4].map(n=>{const o=officerById(settings.approvalIds['a'+n]);return o?{id:o.id,name:o.name,role:o.role,signatureRef:o.signatureRef||''}:null})),site:currentSite(),projectId:$('#projectId').value.trim(),pekerjaan:$('#pekerjaan').value.trim(),keteranganUmum:$('#keteranganUmum').value.trim(),bank:clone(b),items:clone(state.items),attachments:{},total:total(),savedAt:new Date().toISOString()};for(const key of Object.keys(MEDIA_KEYS))if(state[key])d.attachments[key]=attachmentMeta(state[key]);return cleanDocForLocalStorage(d)}
+async function saveCurrent(){
+  await mediaMigrationPromise;if(!$('#pkbonNo').value.trim())generatePkbonNo(false);let d=collect();if(!d.pkbonNo)return toast('Nomor PKBON wajib diisi');if(!d.site||!d.projectId||!TrackersCore.date(d.tanggal))return toast('Site, Project ID, dan tanggal wajib diisi.');if(d.status!=='Draft'){const errors=validateDocument();if(errors.length){alert(errors.join('\n'));return}}
   const duplicate=history.find(x=>String(x.pkbonNo).toLowerCase()===d.pkbonNo.toLowerCase()&&x.id!==d.id);if(duplicate){alert('Nomor PKBON '+d.pkbonNo+' sudah ada di riwayat. Gunakan nomor lain.');return}
-  const i=history.findIndex(x=>x.id===d.id);if(i>=0)history[i]=d;else history.unshift(d);
-  if(!saveJSON('pkbon_history',history))return;state.currentId=d.id;state.bankSnapshot=clone(d.bank);state.pkbonAuto=false;renderHistory();renderRekapFilters();renderRekap();renderDashboard();toast('PKBON tersimpan');
+  const previous=history.find(x=>x.id===d.id),createdIds=[];
+  try{
+    for(const key of Object.keys(MEDIA_KEYS)){const pending=state.pendingAttachments?.[key];if(!pending?.blob)continue;const ref=await putMediaBlob(pending.blob,{ownerId:d.id,role:key,name:pending.name,mime:pending.blob.type});d.attachments[key]=ref;createdIds.push(ref.id)}
+    d=cleanDocForLocalStorage(d);const i=history.findIndex(x=>x.id===d.id);if(i>=0)history[i]=d;else history.unshift(d);saveJSON('pkbon_history',history);
+    const oldRefs=previous?.attachments||{},newIds=new Set(Object.values(d.attachments||{}).map(refId));for(const key of Object.keys(MEDIA_KEYS)){const oldId=refId(oldRefs?.[key]);if(oldId&&!newIds.has(oldId))try{await window.PKBONMediaStore.remove(oldId)}catch{}}
+    state.currentId=d.id;state.bankSnapshot=clone(d.bank);state.pendingAttachments=emptyPendingAttachments();state.lampiranPengajuan=refId(d.attachments?.pengajuan);state.lampiranTransfer=refId(d.attachments?.transfer);state.lampiranBuktiBayar=refId(d.attachments?.buktiBayar);state.pkbonAuto=false;
+    renderHistory();renderRekapFilters();renderRekap();renderDashboard();await syncPreview();toast('PKBON tersimpan');
+  }catch(e){for(const id of createdIds)try{await window.PKBONMediaStore.remove(id)}catch{};alert('Data belum tersimpan. Penyimpanan lampiran gagal atau database perangkat penuh. '+(e?.message||''))}
 }
 function newDoc(){
-  state={items:[],lampiranPengajuan:'',lampiranTransfer:'',lampiranBuktiBayar:'',currentId:null,bankSnapshot:null,pkbonAuto:false};
-  $('#status').value='Draft';
-  $('#tanggal').value=today();
-  $('#siteInput').value='';
-  $('#bankSelect').value='';
-  $('#projectId').value='';
-  $('#pekerjaan').value='';
-  $('#keteranganUmum').value='';
-  $('#lampiranPengajuan').value='';
-  $('#lampiranTransfer').value='';
-  $('#lampiranBuktiBayar').value='';
-  state.items=[{uraian:'',sat:'Ls',vol:1,harga:0,keterangan:''}];
-  renderRows();
-  generatePkbonNo(false);
-  syncPreview();
-  showTab('formTab')
+  revokeAttachmentUrls();state={items:[],lampiranPengajuan:'',lampiranTransfer:'',lampiranBuktiBayar:'',pendingAttachments:emptyPendingAttachments(),attachmentUrls:{},currentId:null,bankSnapshot:null,pkbonAuto:false};
+  $('#status').value='Draft';$('#tanggal').value=today();$('#siteInput').value='';$('#bankSelect').value='';$('#projectId').value='';$('#pekerjaan').value='';$('#keteranganUmum').value='';$('#lampiranPengajuan').value='';$('#lampiranTransfer').value='';$('#lampiranBuktiBayar').value='';state.items=[{uraian:'',sat:'Ls',vol:1,harga:0,keterangan:''}];renderRows();generatePkbonNo(false);syncPreview();showTab('formTab')
 }
-function loadDoc(d){
-  if(!d)return;state.workspaceSiteId=d.workspaceSiteId||'';state.documentFormNumber=d.nomorForm||'';state.documentSettings=d.documentSettings||null;state.documentOfficers=d.documentOfficers||null;state.currentId=d.id;state.items=clone(d.items||[]);if(!state.items.length)state.items=[{uraian:'',sat:'Ls',vol:1,harga:0,keterangan:''}];state.lampiranPengajuan=d.lampiranPengajuan||'';state.lampiranTransfer=d.lampiranTransfer||'';state.lampiranBuktiBayar=d.lampiranBuktiBayar||'';state.bankSnapshot=clone(d.bank||null);state.pkbonAuto=false;$('#status').value=STATUSES.includes(d.status)?d.status:'Draft';$('#pkbonNo').value=d.pkbonNo||'';$('#tanggal').value=d.tanggal||today();$('#siteInput').value=d.site||'';$('#projectId').value=d.projectId||'';$('#pekerjaan').value=d.pekerjaan||'';const bi=banks.findIndex(x=>x.nama===d.bank?.nama&&x.rekening===d.bank?.rekening&&x.bank===d.bank?.bank);$('#bankSelect').value=bi>=0?String(bi):'';$('#keteranganUmum').value=d.keteranganUmum||'';$('#lampiranPengajuan').value='';$('#lampiranTransfer').value='';$('#lampiranBuktiBayar').value='';renderRows();syncPreview();showTab('formTab');toast('Riwayat dibuka untuk diedit')
+async function loadDoc(d){
+  await mediaMigrationPromise;if(!d)return;revokeAttachmentUrls();const refs=buildStateAttachments(d);state.workspaceSiteId=d.workspaceSiteId||'';state.documentFormNumber=d.nomorForm||'';state.documentSettings=d.documentSettings||null;state.documentOfficers=d.documentOfficers||null;state.currentId=d.id;state.items=clone(d.items||[]);if(!state.items.length)state.items=[{uraian:'',sat:'Ls',vol:1,harga:0,keterangan:''}];state.lampiranPengajuan=refs.pengajuan;state.lampiranTransfer=refs.transfer;state.lampiranBuktiBayar=refs.buktiBayar;state.pendingAttachments=emptyPendingAttachments();state.attachmentUrls={};state.bankSnapshot=clone(d.bank||null);state.pkbonAuto=false;$('#status').value=STATUSES.includes(d.status)?d.status:'Draft';$('#pkbonNo').value=d.pkbonNo||'';$('#tanggal').value=d.tanggal||today();$('#siteInput').value=d.site||'';$('#projectId').value=d.projectId||'';$('#pekerjaan').value=d.pekerjaan||'';const bi=banks.findIndex(x=>x.nama===d.bank?.nama&&x.rekening===d.bank?.rekening&&x.bank===d.bank?.bank);$('#bankSelect').value=bi>=0?String(bi):'';$('#keteranganUmum').value=d.keteranganUmum||'';$('#lampiranPengajuan').value='';$('#lampiranTransfer').value='';$('#lampiranBuktiBayar').value='';renderRows();await syncPreview();showTab('formTab');toast('Riwayat dibuka untuk diedit')
 }
-function duplicateDoc(d){
-  if(!d)return;const x=clone(d);x.id=null;x.nomorForm='';x.documentSettings=null;x.documentOfficers=null;x.status='Draft';x.tanggal=today();x.pkbonNo='';x.lampiranPengajuan='';x.lampiranTransfer='';x.lampiranBuktiBayar='';loadDoc(x);state.currentId=null;state.lampiranPengajuan='';state.lampiranTransfer='';state.lampiranBuktiBayar='';state.pkbonAuto=false;if(settings.autoNumber)generatePkbonNo(false);syncPreview();toast('Duplikat dibuat sebagai PKBON baru')
-}
+async function duplicateDoc(d){await mediaMigrationPromise;if(!d)return;const x=clone(d);x.id=null;x.nomorForm='';x.documentSettings=null;x.documentOfficers=null;x.status='Draft';x.tanggal=today();x.pkbonNo='';x.attachments={};for(const key of Object.keys(MEDIA_KEYS))delete x[MEDIA_KEYS[key]];await loadDoc(x);state.currentId=null;state.lampiranPengajuan='';state.lampiranTransfer='';state.lampiranBuktiBayar='';state.pendingAttachments=emptyPendingAttachments();state.pkbonAuto=false;if(settings.autoNumber)generatePkbonNo(false);await syncPreview();toast('Duplikat dibuat sebagai PKBON baru')}
 function historySearchText(d){return [d?.pkbonNo,d?.tanggal,d?.status,d?.site,d?.projectId,d?.pekerjaan,d?.keteranganUmum,d?.bank?.nama,d?.bank?.rekening,d?.bank?.bank].filter(Boolean).join(' ').toLocaleLowerCase('id-ID')}
 function renderHistory(){
   const q=($('#historySearch').value||'').trim().toLocaleLowerCase('id-ID'),status=$('#historyStatusFilter').value;const arr=history.filter(d=>(!status||d.status===status)&&(!q||historySearchText(d).includes(q)));
   $('#historyList').innerHTML=arr.length?arr.map(d=>`<div class="history-item"><div class="history-main"><span class="status-badge ${String(d.status).toLowerCase()}">${esc(d.status||'Draft')}</span><div><b>${esc(d.pkbonNo||'(tanpa nomor)')}</b><br><small>${esc(d.site||'')} • ${dateID(d.tanggal)} • ${fmt(d.total)}${d.pekerjaan?' • '+esc(d.pekerjaan):''}</small></div></div><div class="mini-actions"><select data-history-status="${d.id}">${STATUSES.map(x=>`<option${x===d.status?' selected':''}>${x}</option>`).join('')}</select><button data-open="${d.id}">Buka</button><button data-dup="${d.id}">Duplikat</button><button data-delhist="${d.id}">Hapus</button></div></div>`).join(''):'<p class="empty-state">Tidak ada PKBON sesuai filter.</p>';
   $$('[data-history-status]').forEach(s=>s.onchange=()=>{const d=history.find(x=>x.id==s.dataset.historyStatus);if(!d)return;if(s.value!=='Draft'){const errors=documentErrors(d);if(errors.length){s.value=d.status;alert('Buka dan lengkapi PKBON terlebih dahulu:\n'+errors.join('\n'));return;}}const next=history.map(x=>x===d?{...d,status:s.value}:x);saveJSON('pkbon_history',next);history=next;if(state.currentId===d.id)$('#status').value=s.value;renderHistory();renderRekap();renderDashboard();toast('Status diperbarui')});
-  $$('[data-open]').forEach(b=>b.onclick=()=>loadDoc(history.find(x=>x.id==b.dataset.open)));$$('[data-dup]').forEach(b=>b.onclick=()=>duplicateDoc(history.find(x=>x.id==b.dataset.dup)));$$('[data-delhist]').forEach(b=>b.onclick=()=>{if(confirm('Hapus riwayat ini?')){history=history.filter(x=>x.id!=b.dataset.delhist);saveJSON('pkbon_history',history);renderHistory();renderRekapFilters();renderRekap();renderDashboard()}})
+  $$('[data-open]').forEach(b=>b.onclick=()=>loadDoc(history.find(x=>x.id==b.dataset.open)));$$('[data-dup]').forEach(b=>b.onclick=()=>duplicateDoc(history.find(x=>x.id==b.dataset.dup)));$$('[data-delhist]').forEach(b=>b.onclick=async()=>{if(!confirm('Hapus riwayat ini?'))return;const d=history.find(x=>x.id==b.dataset.delhist),refs=Object.values(d?.attachments||{}).map(refId).filter(Boolean);history=history.filter(x=>x.id!=b.dataset.delhist);saveJSON('pkbon_history',history);for(const id of refs)try{await window.PKBONMediaStore.remove(id)}catch{};renderHistory();renderRekapFilters();renderRekap();renderDashboard()})
 }
 
+let officerPreviewUrls={};
+function revokeOfficerPreviewUrls(){for(const url of Object.values(officerPreviewUrls)){try{URL.revokeObjectURL(url)}catch{}}officerPreviewUrls={}}
 function renderMasters(){
   fillSelects();
+  revokeOfficerPreviewUrls();
   $('#siteList').innerHTML=sites.length?sites.map((x,i)=>`<div class="list-item site-master-row"><div class="site-master-fields"><label>Nama Site<input class="site-master-input" data-editsite="${i}" value="${attr(x.name)}"></label><label>Project ID<input data-editproject="${i}" value="${attr(x.projectId||'')}"></label></div><div class="mini-actions"><button data-delsite="${i}">Hapus</button></div></div>`).join(''):'<p>Belum ada site tersimpan. Isi Site dan Project ID pada Form, lalu keduanya akan tersimpan otomatis.</p>';
   $('#bankList').innerHTML=banks.length?banks.map((x,i)=>`<div class="list-item"><div class="bank-master-fields"><label>Nama<input data-bankname="${i}" value="${attr(x.nama)}"></label><label>Nomor Rekening<input data-bankrek="${i}" value="${attr(x.rekening||'')}"></label><label>Bank<input data-bankbank="${i}" value="${attr(x.bank||'')}"></label></div><div class="mini-actions"><button data-delbank="${i}">Hapus</button></div></div>`).join(''):'<p>Belum ada data bank.</p>';
   $('#templateList').innerHTML=templates.length?templates.map((x,i)=>`<div class="list-item"><div class="template-master-fields"><label>Nama<input data-tplname="${i}" value="${attr(x.name)}"></label><label>Uraian<input data-tpluraian="${i}" value="${attr(x.uraian)}"></label><label>Satuan<input data-tplsat="${i}" value="${attr(x.sat||'Ls')}"></label></div><div class="mini-actions"><button data-deltpl="${i}">Hapus</button></div></div>`).join(''):'<p>Belum ada template uraian.</p>';
-  $('#officerList').innerHTML=officers.length?officers.map((o,i)=>`<div class="officer-item"><div class="officer-signature">${o.signature?`<img src="${attr(o.signature)}" alt="TTD">`:'<span>Tanpa TTD</span>'}</div><div class="officer-fields"><label>Nama<input data-offname="${i}" value="${attr(o.name)}"></label><label>Jabatan<input data-offrole="${i}" value="${attr(o.role)}"></label></div><div class="mini-actions vertical"><label class="tiny-file">Ganti TTD<input type="file" data-offsig="${i}" accept="image/png,image/jpeg,image/webp"></label>${o.signature?`<button data-clearsig="${i}">Hapus TTD</button>`:''}<button data-deloff="${i}">Hapus Pejabat</button></div></div>`).join(''):'<p>Belum ada pejabat.</p>';
+  $('#officerList').innerHTML=officers.length?officers.map((o,i)=>`<div class="officer-item"><div class="officer-signature" data-offpreview="${i}">${o.signatureRef?'Memuat TTD…':'<span>Tanpa TTD</span>'}</div><div class="officer-fields"><label>Nama<input data-offname="${i}" value="${attr(o.name)}"></label><label>Jabatan<input data-offrole="${i}" value="${attr(o.role)}"></label></div><div class="mini-actions vertical"><label class="tiny-file">Ganti TTD<input type="file" data-offsig="${i}" accept="image/png,image/jpeg,image/webp"></label>${o.signatureRef?`<button data-clearsig="${i}">Hapus TTD</button>`:''}<button data-deloff="${i}">Hapus Pejabat</button></div></div>`).join(''):'<p>Belum ada pejabat.</p>';
+  $$('#officerList [data-offpreview]').forEach(async box=>{const o=officers[+box.dataset.offpreview],url=o?.signatureRef?await getMediaUrl(refId(o.signatureRef)):'';if(url)officerPreviewUrls[o.id]=url;box.innerHTML=url?`<img src="${attr(url)}" alt="TTD">`:'<span>Tanpa TTD</span>'});
   $$('[data-editsite]').forEach(inp=>inp.onchange=()=>{const i=+inp.dataset.editsite,name=inp.value.trim(),old=sites[i].name;if(!name){inp.value=old;return toast('Nama site tidak boleh kosong')}if(sites.some((x,j)=>j!==i&&x.name.toLowerCase()===name.toLowerCase())){inp.value=old;return toast('Site sudah ada')}if(currentSite().toLowerCase()===old.toLowerCase())$('#siteInput').value=name;sites[i].name=name;sites.sort((a,b)=>a.name.localeCompare(b.name,'id'));saveJSON('pkbon_sites',sites);renderMasters();renderRekapFilters();syncPreview();toast('Nama site diperbarui')});
   $$('[data-editproject]').forEach(inp=>inp.onchange=()=>{const i=+inp.dataset.editproject,site=sites[i];site.projectId=inp.value.trim();if(currentSite().toLowerCase()===site.name.toLowerCase())$('#projectId').value=site.projectId;saveJSON('pkbon_sites',sites);syncPreview();toast('Project ID diperbarui')});
   $$('[data-delsite]').forEach(b=>b.onclick=()=>{const i=+b.dataset.delsite;if(currentSite().toLowerCase()===sites[i].name.toLowerCase()){$('#siteInput').value='';$('#projectId').value=''}sites.splice(i,1);saveJSON('pkbon_sites',sites);renderMasters();renderRekapFilters();syncPreview()});
@@ -246,8 +303,8 @@ function renderMasters(){
   $$('[data-deltpl]').forEach(b=>b.onclick=()=>{templates.splice(+b.dataset.deltpl,1);saveJSON('pkbon_templates',templates);renderMasters();toast('Template dihapus')});
   $$('[data-offname]').forEach(inp=>inp.onchange=()=>updateOfficerField(+inp.dataset.offname,'name',inp.value));
   $$('[data-offrole]').forEach(inp=>inp.onchange=()=>updateOfficerField(+inp.dataset.offrole,'role',inp.value));
-  $$('[data-offsig]').forEach(inp=>inp.onchange=async()=>{const f=inp.files[0];if(!f)return;officers[+inp.dataset.offsig].signature=await imageToDataURL(f,900,400,'image/png',0.92);saveJSON('pkbon_officers',officers);renderMasters();syncPreview();toast('Tanda tangan diperbarui')});
-  $$('[data-clearsig]').forEach(b=>b.onclick=()=>{officers[+b.dataset.clearsig].signature='';saveJSON('pkbon_officers',officers);renderMasters();syncPreview();toast('Tanda tangan dihapus')});
+  $$('[data-offsig]').forEach(inp=>inp.onchange=async()=>{const f=inp.files[0];if(!f)return;try{const blob=await imageToBlob(f,900,400,'image/png',.92,450000);const ref=await putMediaBlob(blob,{ownerId:officers[+inp.dataset.offsig].id,role:'signature',name:f.name,mime:blob.type});officers[+inp.dataset.offsig].signatureRef=ref;delete officers[+inp.dataset.offsig].signature;saveJSON('pkbon_officers',officers);renderMasters();await syncPreview();toast('Tanda tangan diperbarui')}catch(e){toast('Gagal menyimpan tanda tangan: '+e.message)}});
+  $$('[data-clearsig]').forEach(b=>b.onclick=()=>{officers[+b.dataset.clearsig].signatureRef='';delete officers[+b.dataset.clearsig].signature;saveJSON('pkbon_officers',officers);renderMasters();syncPreview();toast('Tanda tangan dihapus')});
   $$('[data-deloff]').forEach(b=>b.onclick=()=>{const i=+b.dataset.deloff,o=officers[i];if(!confirm('Hapus pejabat '+o.name+'?'))return;officers.splice(i,1);for(const k of ['a1','a2','a3','a4'])if(settings.approvalIds[k]===o.id)settings.approvalIds[k]='';saveJSON('pkbon_officers',officers);saveJSON('pkbon_settings',settings);renderMasters();renderSettings();syncPreview()});
 }
 function updateOfficerField(i,k,v){v=v.trim();if(!v)return renderMasters();officers[i][k]=v;saveJSON('pkbon_officers',officers);fillOfficerSelects();syncPreview();toast('Data pejabat tersimpan')}
@@ -318,39 +375,34 @@ function renderDashboard(){
   const recent=[...history].sort((a,b)=>String(b.savedAt||b.tanggal).localeCompare(String(a.savedAt||a.tanggal))).slice(0,5);$('#dashRecent').innerHTML=recent.length?recent.map(d=>`<div class="recent-row"><div><b>${esc(d.pkbonNo||'(tanpa nomor)')}</b><small>${esc(d.site||'Tanpa site')} • ${dateID(d.tanggal)}</small></div><span class="status-badge ${String(d.status).toLowerCase()}">${esc(d.status)}</span></div>`).join(''):'<p class="empty-state">Belum ada PKBON tersimpan.</p>';
 }
 
-function imageToDataURL(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.86,maxChars=0){return new Promise((resolve,reject)=>{
-  const src=URL.createObjectURL(file),img=new Image();
-  const cleanup=()=>{try{URL.revokeObjectURL(src)}catch{}try{img.removeAttribute('src')}catch{}};
-  img.onerror=()=>{cleanup();reject(new Error('Gagal membaca gambar'))};
-  img.onload=()=>{try{
-    let sourceW=img.naturalWidth||img.width,sourceH=img.naturalHeight||img.height,scale=Math.min(1,maxW/sourceW,maxH/sourceH);
-    let w=Math.max(1,Math.round(sourceW*scale)),h=Math.max(1,Math.round(sourceH*scale)),q=quality,out='';
-    for(let attempt=0;attempt<7;attempt++){
-      const c=document.createElement('canvas');c.width=w;c.height=h;
-      const ctx=c.getContext('2d',{alpha:type!=='image/jpeg'});ctx.drawImage(img,0,0,w,h);
-      out=c.toDataURL(type,q);c.width=1;c.height=1;
-      if(!maxChars||out.length<=maxChars)break;
-      if(q>0.52){q=Math.max(0.52,q-0.08);continue;}
-      w=Math.max(1,Math.round(w*0.82));h=Math.max(1,Math.round(h*0.82));q=quality;
-    }
-    cleanup();resolve(out);
-  }catch(err){cleanup();reject(err)}};
-  img.src=src;
-})}
-async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{state[key]=await imageToDataURL(f,1600,1600,'image/jpeg',.76,600000);syncPreview();toast('Lampiran dimuat')}catch{toast('Gagal membaca gambar')}}
+function imageToBlob(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.76,maxBytes=450000){return new Promise((resolve,reject)=>{const src=URL.createObjectURL(file),img=new Image();const cleanup=()=>{try{URL.revokeObjectURL(src)}catch{}try{img.removeAttribute('src')}catch{}};img.onerror=()=>{cleanup();reject(new Error('Gagal membaca gambar'))};img.onload=async()=>{try{let sw=img.naturalWidth||img.width,sh=img.naturalHeight||img.height,scale=Math.min(1,maxW/sw,maxH/sh),w=Math.max(1,Math.round(sw*scale)),h=Math.max(1,Math.round(sh*scale)),q=quality,last=null;for(let attempt=0;attempt<10;attempt++){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{alpha:type!=='image/jpeg'});ctx.drawImage(img,0,0,w,h);const blob=await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('Browser gagal membuat gambar')),type,q));c.width=1;c.height=1;last=blob;if(!maxBytes||blob.size<=maxBytes)break;if(q>0.5)q=Math.max(0.5,q-0.08);else{w=Math.max(1,Math.round(w*0.82));h=Math.max(1,Math.round(h*0.82));q=quality}}cleanup();if(last)resolve(last);else reject(new Error('Gambar tidak dapat diproses'))}catch(err){cleanup();reject(err)}};img.src=src})}
+async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{const blob=await imageToBlob(f,1600,1600,'image/jpeg',.76,450000);state.pendingAttachments[key]={blob,name:f.name,type:blob.type,size:blob.size};state[key]='';await syncPreview();toast('Lampiran dimuat (belum disimpan sampai PKBON disimpan)')}catch(e){toast('Gagal membaca gambar: '+e.message)}}
 
 function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
-function backupData(){const data={app:'PKBON',version:'5.0',exportedAt:new Date().toISOString(),settings,sites,banks,templates,officers,history};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});downloadBlob(blob,'PKBON_Backup_'+today()+'.json');toast('Backup berhasil dibuat')}
+function backupReferencedMediaIds(){const ids=new Set();const add=v=>{const id=refId(v);if(id)ids.add(id)};for(const d of history||[]){for(const key of Object.keys(MEDIA_KEYS))add(d?.attachments?.[key]);for(const o of d?.documentOfficers||[])add(o?.signatureRef)}for(const o of officers||[])add(o?.signatureRef);return ids}
+async function backupData(){try{await mediaMigrationPromise;const ids=backupReferencedMediaIds(),media={};for(const rec of await window.PKBONMediaStore.all()){if(!ids.has(rec.id))continue;media[rec.id]={id:rec.id,ownerId:rec.ownerId||'',role:rec.role||'',name:rec.name||'',mime:rec.mime||rec.blob?.type||'',size:Number(rec.size||rec.blob?.size||0),createdAt:rec.createdAt||'',dataUrl:await window.PKBONMediaStore.blobToDataUrl(rec.blob)}}const data={app:'PKBON',version:'6.0',exportedAt:new Date().toISOString(),settings,sites,banks,templates,officers,history,attachments:media};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});downloadBlob(blob,'PKBON_Backup_'+today()+'.json');toast('Backup PKBON + lampiran berhasil dibuat')}catch(e){toast('Backup gagal: '+e.message)}}
 async function restoreData(file){
   try{
-    if(file.size>40*1024*1024)throw new Error('Backup melebihi 40 MB');
-    const d=JSON.parse(await file.text());
+    if(file.size>250*1024*1024)throw new Error('Backup melebihi 250 MB');const d=JSON.parse(await file.text());
     const pk={pkbon_settings:{...DEFAULTS.settings,...(d.settings||{}),approvalIds:d.settings?.approvalIds||{}},pkbon_sites:d.sites,pkbon_banks:d.banks,pkbon_templates:d.templates||[],pkbon_officers:d.officers||[],pkbon_history:d.history};
-    TrackersCore.validateSnapshot({trackly:{sites:[]},pkbon:pk});
-    if(!confirm('Restore mengganti data PKBON. Pastikan Anda sudah menyimpan backup saat ini. Lanjutkan?'))return;
-    TrackersCore.writeBatch(localStorage,[...cloudChangeEntries(),...Object.entries(pk).map(([k,v])=>[k,JSON.stringify(v)])]);
+    TrackersCore.validateSnapshot({trackly:{sites:[]},pkbon:pk});if(!confirm('Restore mengganti data PKBON dan lampiran pada perangkat ini. Pastikan Anda sudah menyimpan backup saat ini. Lanjutkan?'))return;
+    await mediaReadyPromise;await window.PKBONMediaStore.clear();
+    const importedAttachments={};for(const [id,rec] of Object.entries(d.attachments||{})){const blob=window.PKBONMediaStore.dataUrlToBlob(rec.dataUrl||'');if(!blob)continue;const record={id,ownerId:rec.ownerId||'',role:rec.role||'',name:rec.name||'',mime:rec.mime||blob.type,size:Number(rec.size||blob.size),createdAt:rec.createdAt||new Date().toISOString(),blob};await window.PKBONMediaStore.put(record);importedAttachments[id]=true}
+    async function restoreLegacyRecord(record){
+      const out=cleanDocForLocalStorage(record),attachments={...(out.attachments||{})};
+      for(const key of Object.keys(MEDIA_KEYS)){const value=record?.[MEDIA_KEYS[key]];if(legacyDataUrl(value)){const blob=window.PKBONMediaStore.dataUrlToBlob(value);const ref=await putMediaBlob(blob,{ownerId:record.id,role:key,name:MEDIA_KEYS[key],mime:blob.type});attachments[key]=ref}}
+      if(Object.keys(attachments).length)out.attachments=attachments;else delete out.attachments;
+      if(Array.isArray(record?.documentOfficers)){
+        out.documentOfficers=[];for(const o of record.documentOfficers){const x={...o};if(legacyDataUrl(o?.signature)){const blob=window.PKBONMediaStore.dataUrlToBlob(o.signature);const ref=await putMediaBlob(blob,{ownerId:record.id,role:'signature',name:'signature',mime:blob.type});x.signatureRef=ref;delete x.signature}else if(x.signatureRef)x.signatureRef=attachmentMeta(refId(x.signatureRef),x.signatureName,x.signatureMime,x.signatureSize);delete x.signature;out.documentOfficers.push(x)}
+      }
+      return out;
+    }
+    const restoredOfficers=[];for(const o of Array.isArray(d.officers)?d.officers:[]){const x={...o};if(legacyDataUrl(o?.signature)){const blob=window.PKBONMediaStore.dataUrlToBlob(o.signature);const ref=await putMediaBlob(blob,{ownerId:o.id,role:'signature',name:'signature',mime:blob.type});x.signatureRef=ref;delete x.signature}else if(x.signatureRef)x.signatureRef=attachmentMeta(refId(x.signatureRef),x.signatureName,x.signatureMime,x.signatureSize);delete x.signature;restoredOfficers.push(x)}
+    const restoredHistory=[];for(const doc of Array.isArray(d.history)?d.history:[])restoredHistory.push(await restoreLegacyRecord(doc));
+    const nextPk={...pk,pkbon_officers:restoredOfficers,pkbon_history:restoredHistory};
+    TrackersCore.writeBatch(localStorage,[...cloudChangeEntries(),...Object.entries(nextPk).map(([k,v])=>[k,JSON.stringify(v)])]);
     location.reload();
-  }catch(e){alert('Restore gagal: '+e.message);}
+  }catch(e){alert('Restore gagal: '+e.message)}
 }
 
 function showTab(id){
@@ -428,7 +480,7 @@ html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,Helvet
 `;}
 async function performPrint(){
   rememberSite(false);
-  syncPreview();
+  await syncPreview();
 
   const old=document.title;
   const firstUraian=state.items.find(x=>String(x?.uraian||'').trim())?.uraian||'';
@@ -492,11 +544,11 @@ $('#tanggal').oninput=()=>{refreshAutoNoForDate();syncPreview()};
 $('#siteInput').oninput=()=>{state.workspaceSiteId='';syncPreview();};$('#siteInput').onchange=()=>{applySavedSite();rememberSite(true);syncPreview()};$('#siteInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur()}};
 $('#bankSelect').onchange=()=>{state.bankSnapshot=null;syncPreview()};$('#projectId').oninput=()=>{state.workspaceSiteId='';syncPreview();};$('#projectId').onchange=()=>rememberSite(true);['pekerjaan','keteranganUmum'].forEach(id=>$('#'+id).oninput=syncPreview);
 $('#lampiranPengajuan').onchange=e=>readAttachment(e.target,'lampiranPengajuan');$('#lampiranTransfer').onchange=e=>readAttachment(e.target,'lampiranTransfer');$('#lampiranBuktiBayar').onchange=e=>readAttachment(e.target,'lampiranBuktiBayar');
-$$('[data-remove-attachment]').forEach(b=>b.onclick=()=>{const key=b.dataset.removeAttachment;state[key]='';const input=$('#'+key);if(input)input.value='';syncPreview();toast('Lampiran dihapus')});
+$$('[data-remove-attachment]').forEach(b=>b.onclick=async()=>{const field=b.dataset.removeAttachment,key=Object.entries(MEDIA_KEYS).find(([,v])=>v===field)?.[0];if(!key)return;state.pendingAttachments[key]=null;state[key]='';const input=$('#'+field);if(input)input.value='';await syncPreview();toast('Lampiran akan dihapus saat PKBON disimpan')});
 $('#historySearch').oninput=renderHistory;$('#historyStatusFilter').onchange=renderHistory;
 $('#addBank').onclick=()=>{const x={nama:$('#mBankNama').value.trim(),rekening:$('#mBankRek').value.trim(),bank:$('#mBank').value.trim()};if(!x.nama)return toast('Nama penerima wajib diisi');banks.push(x);saveJSON('pkbon_banks',banks);['mBankNama','mBankRek','mBank'].forEach(id=>$('#'+id).value='');renderMasters();toast('Bank ditambahkan')};
 $('#addTemplate').onclick=()=>{const name=$('#mTemplateName').value.trim(),uraian=$('#mTemplateUraian').value.trim(),sat=$('#mTemplateSat').value.trim()||'Ls';if(!name||!uraian)return toast('Nama dan uraian template wajib diisi');templates.push({id:uid('tpl'),name,uraian,sat,keterangan:''});saveJSON('pkbon_templates',templates);['mTemplateName','mTemplateUraian'].forEach(id=>$('#'+id).value='');$('#mTemplateSat').value='Ls';renderMasters();toast('Template ditambahkan')};
-$('#addOfficer').onclick=async()=>{const name=$('#mOfficerName').value.trim(),role=$('#mOfficerRole').value.trim(),f=$('#mOfficerSig').files[0];if(!name||!role)return toast('Nama dan jabatan pejabat wajib diisi');let signature='';if(f)try{signature=await imageToDataURL(f,900,400,'image/png',.92)}catch{return toast('Gagal membaca tanda tangan')}officers.push({id:uid('off'),name,role,signature});saveJSON('pkbon_officers',officers);$('#mOfficerName').value='';$('#mOfficerRole').value='';$('#mOfficerSig').value='';renderMasters();renderSettings();syncPreview();toast('Pejabat ditambahkan')};
+$('#addOfficer').onclick=async()=>{const name=$('#mOfficerName').value.trim(),role=$('#mOfficerRole').value.trim(),f=$('#mOfficerSig').files[0];if(!name||!role)return toast('Nama dan jabatan pejabat wajib diisi');try{const id=uid('off'),o={id,name,role,signatureRef:''};if(f){const blob=await imageToBlob(f,900,400,'image/png',.92,450000);o.signatureRef=await putMediaBlob(blob,{ownerId:id,role:'signature',name:f.name,mime:blob.type})}officers.push(o);saveJSON('pkbon_officers',officers);$('#mOfficerName').value='';$('#mOfficerRole').value='';$('#mOfficerSig').value='';renderMasters();renderSettings();await syncPreview();toast('Pejabat ditambahkan')}catch(e){toast('Gagal menyimpan pejabat: '+e.message)}};
 $('#saveSettings').onclick=saveSettings;
 ['rekapMonth','rekapYear','rekapSite','rekapStatus'].forEach(id=>$('#'+id).onchange=renderRekap);$('#rekapSearch').oninput=renderRekap;$('#btnExportExcel').onclick=exportExcel;
 $('#btnBackup').onclick=backupData;$('#restoreFile').onchange=e=>{const f=e.target.files[0];if(f)restoreData(f);e.target.value=''};
