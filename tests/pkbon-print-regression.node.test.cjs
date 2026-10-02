@@ -30,6 +30,16 @@ test('PKBON print flow embeds blob attachments into the print document',()=>{
   assert.ok(source.includes('pw.document.write'));
 });
 
+
+test('PKBON attachment preview keeps a data URL for unsaved images and ignores stale async previews',()=>{
+  assert.ok(source.includes('async function getMediaDataUrl(id)'));
+  assert.ok(source.includes('pending?.previewDataUrl'));
+  assert.ok(source.includes('let previewSyncToken=0'));
+  assert.ok(source.includes('if(myToken!==previewSyncToken)return;'));
+  assert.ok(source.includes("const previewDataUrl=window.PKBONMediaStore?.blobToDataUrl?await window.PKBONMediaStore.blobToDataUrl(blob)"));
+  assert.ok(source.includes("previewDataUrl};state[key]=\'\';await syncPreview()"));
+});
+
 test('PKBON print popup opens before awaited preview work',()=>{
   const printStart=source.indexOf('async function performPrint');
   const syncPos=source.indexOf('await syncPreview()',printStart);

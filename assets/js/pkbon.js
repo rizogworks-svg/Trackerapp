@@ -26,7 +26,7 @@ function clone(x){return JSON.parse(JSON.stringify(x))}
 function refId(ref){return typeof ref==='string'?ref:String(ref?.id||'')}
 function attachmentMeta(id,name='',mime='',size=0){return id?{id,name:String(name||''),mime:String(mime||''),size:Number(size)||0}:null}
 function emptyPendingAttachments(){return {pengajuan:null,transfer:null,buktiBayar:null}}
-function revokeAttachmentUrls(){for(const url of Object.values(state.attachmentUrls||{})){try{URL.revokeObjectURL(url)}catch{}}state.attachmentUrls={}}
+function revokeAttachmentUrls(){for(const url of Object.values(state.attachmentUrls||{})){if(/^blob:/i.test(String(url||''))){try{URL.revokeObjectURL(url)}catch{}}}state.attachmentUrls={}}
 function legacyDataUrl(value){return typeof value==='string'&&/^data:image\//i.test(value)}
 function attachmentRefForDoc(doc,key){const direct=doc?.attachments?.[key];if(direct)return attachmentMeta(refId(direct),direct?.name,direct?.mime,direct?.size);const field=MEDIA_KEYS[key],legacy=doc?.[field];return legacy&&!legacyDataUrl(legacy)?attachmentMeta(legacy):null}
 function cleanDocForLocalStorage(doc){
@@ -68,6 +68,7 @@ async function putMediaBlob(blob,{ownerId='',role='',name='',mime=''}={}){
   await window.PKBONMediaStore.put(record); return attachmentMeta(id,record.name,record.mime,record.size);
 }
 async function getMediaUrl(id){if(!id||!window.PKBONMediaStore)return '';await mediaReadyPromise;const rec=await window.PKBONMediaStore.get(id);return rec?.blob?URL.createObjectURL(rec.blob):''}
+async function getMediaDataUrl(id){if(!id||!window.PKBONMediaStore)return '';await mediaReadyPromise;const rec=await window.PKBONMediaStore.get(id);if(!rec?.blob)return '';if(window.PKBONMediaStore.blobToDataUrl)return window.PKBONMediaStore.blobToDataUrl(rec.blob);return await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(reader.error||new Error('Gagal membaca lampiran'));reader.readAsDataURL(rec.blob)})}
 async function migrateLegacyMedia(){
   if(!window.PKBONMediaStore)return {historyChanged:false,officersChanged:false}; await mediaReadyPromise; let historyChanged=false,officersChanged=false; const migratedHistory=[];
   for(const o of Array.isArray(officers)?officers:[]){
@@ -245,16 +246,20 @@ function applySavedSite(){
 }
 
 function setSig(img,src){if(src){img.src=src;img.classList.remove('empty')}else{img.removeAttribute('src');img.classList.add('empty')}}
-async function resolveAttachmentUrl(key){const pending=state.pendingAttachments?.[key];if(pending?.blob)return URL.createObjectURL(pending.blob);return state[key]?await getMediaUrl(state[key]):''}
+async function resolveAttachmentUrl(key){const pending=state.pendingAttachments?.[key];if(pending?.previewDataUrl)return pending.previewDataUrl;return state[key]?await getMediaDataUrl(state[key]):''}
+let previewSyncToken=0;
 async function syncPreview(){
+  const myToken=++previewSyncToken;
   const printSettings=state.documentSettings||settings,b=selectedBank()||{nama:'',rekening:'',bank:''};
   $('#pvNomorForm').textContent=state.documentFormNumber||currentFormNumber();$('#pvPkbonNo').textContent=$('#pkbonNo').value;$('#pvTanggal').textContent=dateID($('#tanggal').value);$('#pvId').textContent=printSettings.id;$('#pvNama').textContent=printSettings.nama;$('#pvProjectId').textContent=$('#projectId').value||'';$('#pvPekerjaan').textContent=$('#pekerjaan').value||'';$('#pvSite').textContent=currentSite();
   const rows=[...state.items];while(rows.length<16)rows.push(null);$('#pvRows').innerHTML=rows.map((it,i)=>it?`<tr><td class="center">${i+1}</td><td>${esc(it.uraian)}</td><td class="center">${esc(it.sat)}</td><td class="center">${Number(it.vol)||0}</td><td class="money">${fmt(it.harga)}</td><td class="money">${fmt((Number(it.vol)||0)*(Number(it.harga)||0))}</td><td>${esc(it.keterangan)}</td></tr>`:'<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('');
   const gt=total();$('#pvGrandTotal').textContent=fmt(gt);$('#grandTotalLabel').textContent='Grand Total: '+fmt(gt);$('#pvTerbilang').textContent=terbilang(gt);$('#pvBankNama').textContent=b.nama||'';$('#pvBankRek').textContent=b.rekening||'';$('#pvBank').textContent=b.bank||'';const tglValue=$('#tanggal').value;const hari=dayNameID(tglValue);$('#pvKotaTanggal').textContent=`${hari?hari+', ':''}${longDateID(tglValue)}`;
-  revokeAttachmentUrls();
   const officersForPreview=state.documentOfficers||[1,2,3,4].map(n=>officerById(settings.approvalIds['a'+n]));
-  await Promise.all([1,2,3,4].map(async n=>{const o=officersForPreview?.[n-1]||null;$('#pvAppr'+n+'Name').textContent=o?.name||'';$('#pvAppr'+n+'Role').textContent=o?.role||'';const url=o?.signatureRef?await getMediaUrl(refId(o.signatureRef)):(o?.signature||'');if(url)state.attachmentUrls['signature'+n]=url;setSig($('#pvSig'+n),url)}));
+  const officerUrls=await Promise.all([1,2,3,4].map(async n=>{const o=officersForPreview?.[n-1]||null;$('#pvAppr'+n+'Name').textContent=o?.name||'';$('#pvAppr'+n+'Role').textContent=o?.role||'';return o?.signatureRef?getMediaDataUrl(refId(o.signatureRef)):(o?.signature||'')}));
   const [pengajuan,transfer,buktiBayar]=await Promise.all(['pengajuan','transfer','buktiBayar'].map(resolveAttachmentUrl));
+  if(myToken!==previewSyncToken)return;
+  revokeAttachmentUrls();
+  officerUrls.forEach((url,i)=>{if(url)state.attachmentUrls['signature'+(i+1)]=url;setSig($('#pvSig'+(i+1)),url)});
   if(pengajuan)state.attachmentUrls.pengajuan=pengajuan;if(transfer)state.attachmentUrls.transfer=transfer;if(buktiBayar)state.attachmentUrls.buktiBayar=buktiBayar;
   setSig($('#pvLampiranPengajuan'),pengajuan);setSig($('#pvLampiranTransfer'),transfer);setSig($('#pvLampiranBuktiBayar'),buktiBayar);
   const p2=$('#page2'),p3=$('#page3');p2.classList.toggle('hidden-print',!pengajuan&&!transfer);p3.classList.toggle('hidden-print',!buktiBayar);
@@ -382,7 +387,7 @@ function renderDashboard(){
 }
 
 function imageToBlob(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.76,maxBytes=450000){return new Promise((resolve,reject)=>{const src=URL.createObjectURL(file),img=new Image();const cleanup=()=>{try{URL.revokeObjectURL(src)}catch{}try{img.removeAttribute('src')}catch{}};img.onerror=()=>{cleanup();reject(new Error('Gagal membaca gambar'))};img.onload=async()=>{try{let sw=img.naturalWidth||img.width,sh=img.naturalHeight||img.height;if(!sw||!sh)throw new Error('Ukuran gambar tidak valid');const scale=Math.min(1,maxW/sw,maxH/sh);let w=Math.max(1,Math.round(sw*scale)),h=Math.max(1,Math.round(sh*scale)),q=quality,last=null;for(let attempt=0;attempt<10;attempt++){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{alpha:type!=='image/jpeg'});if(!ctx)throw new Error('Browser tidak mendukung pemrosesan gambar');ctx.drawImage(img,0,0,w,h);const blob=await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('Browser gagal membuat gambar')),type,q));c.width=1;c.height=1;last=blob;if(!maxBytes||blob.size<=maxBytes)break;if(q>0.5)q=Math.max(0.5,q-0.08);else{w=Math.max(1,Math.round(w*0.82));h=Math.max(1,Math.round(h*0.82));q=quality}}cleanup();if(last)resolve(last);else reject(new Error('Gambar tidak dapat diproses'))}catch(err){cleanup();reject(err)}};img.src=src})}
-async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{const blob=await imageToBlob(f,1600,1600,'image/jpeg',.76,450000);state.pendingAttachments[key]={blob,name:f.name,type:blob.type,size:blob.size};state[key]='';await syncPreview();toast('Lampiran dimuat (belum disimpan sampai PKBON disimpan)')}catch(e){toast('Gagal membaca gambar: '+e.message)}finally{input.value=''}}
+async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{const blob=await imageToBlob(f,1600,1600,'image/jpeg',.76,450000);const previewDataUrl=window.PKBONMediaStore?.blobToDataUrl?await window.PKBONMediaStore.blobToDataUrl(blob):await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(reader.error||new Error('Gagal menyiapkan preview'));reader.readAsDataURL(blob)});state.pendingAttachments[key]={blob,name:f.name,type:blob.type,size:blob.size,previewDataUrl};state[key]='';await syncPreview();toast('Lampiran siap dipakai dan akan disimpan saat PKBON disimpan')}catch(e){toast('Gagal membaca gambar: '+e.message)}finally{input.value=''}}
 
 function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function backupReferencedMediaIds(){const ids=new Set();const add=v=>{const id=refId(v);if(id)ids.add(id)};for(const d of history||[]){for(const key of Object.keys(MEDIA_KEYS))add(d?.attachments?.[key]);for(const o of d?.documentOfficers||[])add(o?.signatureRef)}for(const o of officers||[])add(o?.signatureRef);return ids}
