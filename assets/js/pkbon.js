@@ -161,10 +161,16 @@ function siteOptionLabel(s){return [s.name,s.projectId,s.siteId,s.workType].filt
 function siteIndex(name=currentSite()){const exact=sites.findIndex(x=>state.workspaceSiteId&&x.workspaceSiteId===state.workspaceSiteId);if(exact>=0)return exact;const matches=sites.filter(x=>x.name.toLowerCase()===String(name||'').trim().toLowerCase()&&x.projectId.toLowerCase()===currentProjectId().toLowerCase());return matches.length===1?sites.indexOf(matches[0]):-1;}
 function savedSite(name=currentSite()){const i=siteIndex(name);return i>=0?sites[i]:null}
 function cleanFilenamePart(value){return String(value||'').replace(/[\\/:*?"<>|\x00-\x1F]/g,' ').replace(/\s+/g,' ').replace(/[. ]+$/g,'').trim()}
+function limitFilenameLength(value,max=120){
+  const text=cleanFilenamePart(value);
+  if(text.length<=max)return text;
+  const clipped=text.slice(0,max).replace(/\s+\S*$/,'').trim();
+  return clipped||text.slice(0,max).trim();
+}
 function buildPrintTitle(pkbonNo,keterangan,site,uraian=''){
   const raw=String(pkbonNo||''),number=(raw.match(/^\s*(\d{5})/)||[])[1]||raw.replace(/\D/g,'').slice(0,5);
   const description=cleanFilenamePart(keterangan)||cleanFilenamePart(uraian);
-  return [number?'PKBON '+number:'PKBON',description,cleanFilenamePart(site)].filter(Boolean).join(' - ');
+  return limitFilenameLength([number?'PKBON '+number:'PKBON',description,cleanFilenamePart(site)].filter(Boolean).join(' - '));
 }
 function officerById(id){return officers.find(x=>x.id===id)||null}
 function selectedBank(){const i=$('#bankSelect').value;if(i!=='')return banks[+i]||null;return state.bankSnapshot||null}
@@ -375,8 +381,8 @@ function renderDashboard(){
   const recent=[...history].sort((a,b)=>String(b.savedAt||b.tanggal).localeCompare(String(a.savedAt||a.tanggal))).slice(0,5);$('#dashRecent').innerHTML=recent.length?recent.map(d=>`<div class="recent-row"><div><b>${esc(d.pkbonNo||'(tanpa nomor)')}</b><small>${esc(d.site||'Tanpa site')} • ${dateID(d.tanggal)}</small></div><span class="status-badge ${String(d.status).toLowerCase()}">${esc(d.status)}</span></div>`).join(''):'<p class="empty-state">Belum ada PKBON tersimpan.</p>';
 }
 
-function imageToBlob(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.76,maxBytes=450000){return new Promise((resolve,reject)=>{const src=URL.createObjectURL(file),img=new Image();const cleanup=()=>{try{URL.revokeObjectURL(src)}catch{}try{img.removeAttribute('src')}catch{}};img.onerror=()=>{cleanup();reject(new Error('Gagal membaca gambar'))};img.onload=async()=>{try{let sw=img.naturalWidth||img.width,sh=img.naturalHeight||img.height,scale=Math.min(1,maxW/sw,maxH/sh),w=Math.max(1,Math.round(sw*scale)),h=Math.max(1,Math.round(sh*scale)),q=quality,last=null;for(let attempt=0;attempt<10;attempt++){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{alpha:type!=='image/jpeg'});ctx.drawImage(img,0,0,w,h);const blob=await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('Browser gagal membuat gambar')),type,q));c.width=1;c.height=1;last=blob;if(!maxBytes||blob.size<=maxBytes)break;if(q>0.5)q=Math.max(0.5,q-0.08);else{w=Math.max(1,Math.round(w*0.82));h=Math.max(1,Math.round(h*0.82));q=quality}}cleanup();if(last)resolve(last);else reject(new Error('Gambar tidak dapat diproses'))}catch(err){cleanup();reject(err)}};img.src=src})}
-async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{const blob=await imageToBlob(f,1600,1600,'image/jpeg',.76,450000);state.pendingAttachments[key]={blob,name:f.name,type:blob.type,size:blob.size};state[key]='';await syncPreview();toast('Lampiran dimuat (belum disimpan sampai PKBON disimpan)')}catch(e){toast('Gagal membaca gambar: '+e.message)}}
+function imageToBlob(file,maxW=1600,maxH=1600,type='image/jpeg',quality=.76,maxBytes=450000){return new Promise((resolve,reject)=>{const src=URL.createObjectURL(file),img=new Image();const cleanup=()=>{try{URL.revokeObjectURL(src)}catch{}try{img.removeAttribute('src')}catch{}};img.onerror=()=>{cleanup();reject(new Error('Gagal membaca gambar'))};img.onload=async()=>{try{let sw=img.naturalWidth||img.width,sh=img.naturalHeight||img.height;if(!sw||!sh)throw new Error('Ukuran gambar tidak valid');const scale=Math.min(1,maxW/sw,maxH/sh);let w=Math.max(1,Math.round(sw*scale)),h=Math.max(1,Math.round(sh*scale)),q=quality,last=null;for(let attempt=0;attempt<10;attempt++){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{alpha:type!=='image/jpeg'});if(!ctx)throw new Error('Browser tidak mendukung pemrosesan gambar');ctx.drawImage(img,0,0,w,h);const blob=await new Promise((res,rej)=>c.toBlob(b=>b?res(b):rej(new Error('Browser gagal membuat gambar')),type,q));c.width=1;c.height=1;last=blob;if(!maxBytes||blob.size<=maxBytes)break;if(q>0.5)q=Math.max(0.5,q-0.08);else{w=Math.max(1,Math.round(w*0.82));h=Math.max(1,Math.round(h*0.82));q=quality}}cleanup();if(last)resolve(last);else reject(new Error('Gambar tidak dapat diproses'))}catch(err){cleanup();reject(err)}};img.src=src})}
+async function readAttachment(input,key){const f=input.files[0];if(!f)return;if(!/^image\/(png|jpeg|webp)$/.test(f.type)||f.size>15*1024*1024)return toast('Gunakan JPG, PNG, atau WebP maksimal 15 MB.');try{const blob=await imageToBlob(f,1600,1600,'image/jpeg',.76,450000);state.pendingAttachments[key]={blob,name:f.name,type:blob.type,size:blob.size};state[key]='';await syncPreview();toast('Lampiran dimuat (belum disimpan sampai PKBON disimpan)')}catch(e){toast('Gagal membaca gambar: '+e.message)}finally{input.value=''}}
 
 function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},500)}
 function backupReferencedMediaIds(){const ids=new Set();const add=v=>{const id=refId(v);if(id)ids.add(id)};for(const d of history||[]){for(const key of Object.keys(MEDIA_KEYS))add(d?.attachments?.[key]);for(const o of d?.documentOfficers||[])add(o?.signatureRef)}for(const o of officers||[])add(o?.signatureRef);return ids}
@@ -455,7 +461,7 @@ html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,Helvet
 .meta td{padding:1px 4px}
 .paper hr{border:0;border-top:2px solid #111;margin:4mm 0}
 .identity{border-collapse:collapse;font-size:9.6pt}
-.identity td{padding:1.2px 4px}
+.identity td{padding:1.2px 4px;overflow-wrap:anywhere;word-break:break-word}
 .identity td:first-child{width:25mm}
 .identity td:nth-child(2){width:4mm}
 .intro{margin:4mm 0}
@@ -478,46 +484,70 @@ html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,Helvet
 #printArea *,#printArea *::before,#printArea *::after{color:#000!important;text-shadow:none!important}
 @media print{html,body,#printArea{width:210mm!important;margin:0!important;padding:0!important;background:#fff!important}.paper{margin:0 auto!important;box-shadow:none!important}}
 `;}
+async function blobUrlToDataUrl(url){
+  if(!/^blob:/i.test(String(url||'')))return String(url||'');
+  const response=await fetch(url);
+  if(!response.ok)throw new Error('Lampiran tidak dapat dibaca untuk cetak');
+  const blob=await response.blob();
+  if(window.PKBONMediaStore?.blobToDataUrl)return window.PKBONMediaStore.blobToDataUrl(blob);
+  return await new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(String(reader.result||''));
+    reader.onerror=()=>reject(reader.error||new Error('Gagal menyiapkan gambar untuk cetak'));
+    reader.readAsDataURL(blob);
+  });
+}
+async function buildPrintMarkup(){
+  const area=root.querySelector('#printArea');
+  if(!area)return '';
+  const clone=area.cloneNode(true);
+  const imgs=[...clone.querySelectorAll('img')].filter(img=>img.getAttribute('src'));
+  await Promise.all(imgs.map(async img=>{
+    const src=img.getAttribute('src')||'';
+    if(!/^blob:/i.test(src))return;
+    try{img.setAttribute('src',await blobUrlToDataUrl(src));}
+    catch(err){console.warn('PKBON print attachment skipped',err);img.removeAttribute('src');img.classList.add('empty');}
+  }));
+  return clone.innerHTML;
+}
 async function performPrint(){
-  rememberSite(false);
-  await syncPreview();
-
-  const old=document.title;
-  const firstUraian=state.items.find(x=>String(x?.uraian||'').trim())?.uraian||'';
-  const keterangan=$('#keteranganUmum').value.trim();
-  const printTitle=buildPrintTitle($('#pkbonNo').value,keterangan,currentSite(),firstUraian);
-
-  // Buka jendela cetak saat masih berada di event klik agar tidak dianggap popup liar.
+  // Open the popup before awaiting any async work so the browser keeps the user gesture.
   const pw=window.open('','_blank','width=980,height=900');
   if(!pw){
     toast('Popup cetak diblokir browser. Izinkan pop-up untuk Trackers.');
     return;
   }
-  pw.document.open();
-  pw.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+esc(printTitle)+'</title><style>'+isolatedPrintCss()+'</style></head><body><div id="printArea">'+root.querySelector('#printArea').innerHTML+'</div></body></html>');
-  pw.document.close();
-
-  const imgs=[...pw.document.querySelectorAll('#printArea img')].filter(img=>img.getAttribute('src'));
-  await Promise.all(imgs.map(img=>{
-    if(img.complete)return Promise.resolve();
-    return new Promise(resolve=>{
-      const done=()=>resolve();
-      img.addEventListener('load',done,{once:true});
-      img.addEventListener('error',done,{once:true});
-      setTimeout(done,1500);
-    });
-  }));
-
-  // Menunggu layout A4 terpasang sebelum print dialog dibuka.
-  await new Promise(resolve=>pw.requestAnimationFrame(()=>pw.requestAnimationFrame(resolve)));
   try{
+    rememberSite(false);
+    await syncPreview();
+
+    const firstUraian=state.items.find(x=>String(x?.uraian||'').trim())?.uraian||'';
+    const keterangan=$('#keteranganUmum').value.trim();
+    const printTitle=buildPrintTitle($('#pkbonNo').value,keterangan,currentSite(),firstUraian);
+    const printMarkup=await buildPrintMarkup();
+
+    pw.document.open();
+    pw.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+esc(printTitle)+'</title><style>'+isolatedPrintCss()+'</style></head><body><div id="printArea">'+printMarkup+'</div></body></html>');
+    pw.document.close();
+
+    const imgs=[...pw.document.querySelectorAll('#printArea img')].filter(img=>img.getAttribute('src'));
+    await Promise.all(imgs.map(img=>{
+      if(img.complete)return Promise.resolve();
+      return new Promise(resolve=>{
+        const done=()=>resolve();
+        img.addEventListener('load',done,{once:true});
+        img.addEventListener('error',done,{once:true});
+        setTimeout(done,1500);
+      });
+    }));
+
+    await new Promise(resolve=>pw.requestAnimationFrame(()=>pw.requestAnimationFrame(resolve)));
     pw.focus();
     pw.print();
   }catch(err){
     console.error('PKBON print failed',err);
     try{pw.close()}catch{}
   }
-  document.title=old;
 }
 function printDocument(){const errors=validateDocument();if(!errors.length)return performPrint();$('#validationList').innerHTML=errors.map(x=>`<li>${esc(x)}</li>`).join('');$('#validationModal').classList.add('open')}
 
